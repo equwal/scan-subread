@@ -1,0 +1,51 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>Scan Subread</title>
+    <link rel="stylesheet" href="/src/style.css" />
+  </head>
+  <body>
+    <aside id="panel">
+      <h1>Scan Subread</h1>
+      <p class="hint">Load a scanned PDF, its audiobook, and a subtitle file (SRT or VTT).</p>
+
+      <label>PDF (scanned) <input id="pdf-file" type="file" accept="application/pdf" /></label>
+      <label>Audio <input id="audio-file" type="file" accept="audio/*" /></label>
+      <label>Subtitles <input id="sub-file" type="file" accept=".srt,.vtt,text/*" /></label>
+      <label
+        >OCR language
+        <select id="lang">
+          <option value="eng">English (eng)</option>
+          <option value="jpn">Japanese, horizontal (jpn)</option>
+          <option value="jpn_vert">Japanese, vertical (jpn_vert)</option>
+          <option value="jpn+eng">Japanese + English</option>
+        </select>
+      </label>
+      <label>Pages to OCR <input id="max-pages" type="number" min="1" value="3" /></label>
+      <button id="run" disabled>OCR and align</button>
+      <div id="status" aria-live="polite"></div>
+      <progress id="progress" max="1" value="0" hidden></progress>
+
+      <audio id="audio" controls></audio>
+
+      <ol id="cues"></ol>
+    </aside>
+
+    <main id="main">
+      <nav id="pager">
+        <button id="prev">Previous</button>
+        <span id="page-label">No PDF</span>
+        <button id="next">Next</button>
+      </nav>
+      <div id="viewer">
+        <div id="page">
+          <div id="overlay"></div>
+        </div>
+      </div>
+    </main>
+
+    <script type="module" src="/src/main.ts"></script>
+  </body>
+</html>

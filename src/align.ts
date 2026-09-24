@@ -117,7 +117,9 @@ export function alignCues(cueTexts: readonly string[], ocr: string): CharSpan[] 
       if (lo < 0) lo = p;
       hi = p + 1;
     }
-    spans.push(lo < 0 ? { start: 0, end: 0, matched: false } : { start: lo, end: hi, matched: true });
+    spans.push(
+      lo < 0 ? { start: 0, end: 0, matched: false } : { start: lo, end: hi, matched: true },
+    );
   }
 
   fillGaps(spans, cueTexts, ocr.length);
@@ -172,7 +174,8 @@ function fillGaps(spans: CharSpan[], cueTexts: readonly string[], ocrLength: num
 export function toTokenSpan(span: CharSpan, stream: Stream): TokenSpan {
   if (span.end <= span.start) {
     // Empty span: point at the token at or after the position.
-    const t = span.start < stream.tokenOf.length ? stream.tokenOf[span.start]! : stream.tokenOf.length;
+    const t =
+      span.start < stream.tokenOf.length ? stream.tokenOf[span.start]! : stream.tokenOf.length;
     return { start: t, end: t, matched: span.matched };
   }
   return {

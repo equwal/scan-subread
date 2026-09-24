@@ -1,5 +1,11 @@
 import { describe, expect, it } from 'vitest';
-import { alignCues, alignCuesToTokens, buildStream, normalizeText, toTokenSpan } from '../src/align';
+import {
+  alignCues,
+  alignCuesToTokens,
+  buildStream,
+  normalizeText,
+  toTokenSpan,
+} from '../src/align';
 
 describe('normalizeText', () => {
   it('drops spaces and punctuation and folds case', () => {

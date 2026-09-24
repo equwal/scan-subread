@@ -1,0 +1,121 @@
+:root {
+  color-scheme: light dark;
+  font-family: system-ui, sans-serif;
+  --highlight: rgba(255, 200, 0, 0.45);
+  --highlight-weak: rgba(120, 160, 255, 0.35);
+}
+
+body {
+  margin: 0;
+  display: grid;
+  grid-template-columns: 22rem 1fr;
+  height: 100vh;
+}
+
+#panel {
+  padding: 1rem;
+  overflow-y: auto;
+  border-right: 1px solid #8884;
+  display: flex;
+  flex-direction: column;
+  gap: 0.6rem;
+}
+
+#panel h1 {
+  font-size: 1.2rem;
+  margin: 0;
+}
+
+.hint {
+  margin: 0;
+  font-size: 0.85rem;
+  opacity: 0.8;
+}
+
+#panel label {
+  display: flex;
+  flex-direction: column;
+  font-size: 0.85rem;
+  gap: 0.2rem;
+}
+
+#status {
+  font-size: 0.85rem;
+  min-height: 1.2em;
+}
+
+#audio {
+  width: 100%;
+}
+
+#cues {
+  padding-left: 1.5rem;
+  margin: 0;
+  font-size: 0.9rem;
+}
+
+#cues li {
+  cursor: pointer;
+  padding: 0.15rem 0.3rem;
+  border-radius: 3px;
+  white-space: pre-line;
+}
+
+#cues li.unmatched {
+  opacity: 0.55;
+}
+
+#cues li.active {
+  background: var(--highlight);
+}
+
+#main {
+  display: flex;
+  flex-direction: column;
+  min-width: 0;
+}
+
+#pager {
+  display: flex;
+  gap: 1rem;
+  align-items: center;
+  padding: 0.5rem 1rem;
+  border-bottom: 1px solid #8884;
+}
+
+#viewer {
+  overflow: auto;
+  flex: 1;
+  padding: 1rem;
+}
+
+#page {
+  position: relative;
+  margin: 0 auto;
+  max-width: 100%;
+  width: fit-content;
+}
+
+#page canvas {
+  display: block;
+  max-width: 100%;
+  height: auto;
+  box-shadow: 0 0 6px #0006;
+}
+
+#overlay {
+  position: absolute;
+  inset: 0;
+  pointer-events: none;
+}
+
+.box {
+  position: absolute;
+  background: var(--highlight);
+  border-radius: 2px;
+  transition: all 120ms ease-out;
+}
+
+.box.unmatched {
+  background: var(--highlight-weak);
+}
