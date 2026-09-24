@@ -3,6 +3,7 @@
 //   <name>.pdf  one-page image-only PDF, as a scanner would produce
 //   <name>.srt  one cue per text line
 //   silence.wav silent audio long enough for all cues
+//   test-dict.zip tiny Yomitan dictionary for the sample-jpn page
 // Run: npm run fixtures
 
 import { mkdir, writeFile } from 'node:fs/promises';
@@ -10,6 +11,7 @@ import path from 'node:path';
 import { PDFDocument } from 'pdf-lib';
 import sharp from 'sharp';
 import { CUE_SECONDS, FIXTURES, PAGE, toSrt, type Fixture } from '../fixtures/sample-text';
+import { buildTestDictionaryZip } from '../fixtures/test-dict';
 
 const OUT = path.resolve('fixtures');
 
@@ -86,6 +88,8 @@ async function main(): Promise<void> {
   }
   await writeFile(path.join(OUT, 'silence.wav'), silentWav(maxSeconds + 1));
   console.log(`wrote silence.wav (${maxSeconds + 1} s)`);
+  await writeFile(path.join(OUT, 'test-dict.zip'), buildTestDictionaryZip());
+  console.log('wrote test-dict.zip');
 }
 
 main().catch((err) => {
