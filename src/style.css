@@ -102,26 +102,44 @@ body.menu-open #panel {
   flex: 1;
 }
 
-#local-audio {
+#local-audio,
+#audiobook {
   display: flex;
   flex-direction: column;
   gap: 0.4rem;
   font-size: 0.85rem;
 }
 
-#local-audio h2 {
+#local-audio h2,
+#audiobook h2 {
   font-size: 0.95rem;
   margin: 0;
 }
 
-#local-audio .row {
+#local-audio .row,
+#audiobook .row {
   display: flex;
+  flex-wrap: wrap;
   gap: 0.5rem;
 }
 
 #local-audio code,
-#la-status {
+#la-status,
+#ab-status,
+#ab-account {
   word-break: break-all;
+}
+
+#ab-status a {
+  color: inherit;
+}
+
+#audiobook details {
+  font-size: 0.85rem;
+}
+
+#audiobook details label {
+  margin-top: 0.4rem;
 }
 
 #audio {

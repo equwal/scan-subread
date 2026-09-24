@@ -1,6 +1,7 @@
 // UI wiring. Alignment logic lives in align.ts, lookup logic in lookup.ts.
 
 import { alignCuesToTokens, type OcrToken, type TokenSpan } from './align';
+import { setupAudiobook } from './audiobook';
 import {
   deleteDictionary,
   importDictionary,
@@ -40,7 +41,6 @@ const ui = {
   menu: el<HTMLButtonElement>('menu'),
   panel: el<HTMLElement>('panel'),
   pdfFile: el<HTMLInputElement>('pdf-file'),
-  audioFile: el<HTMLInputElement>('audio-file'),
   subFile: el<HTMLInputElement>('sub-file'),
   dictFile: el<HTMLInputElement>('dict-file'),
   dicts: el<HTMLUListElement>('dicts'),
@@ -125,21 +125,26 @@ ui.pdfFile.addEventListener('change', async () => {
   updateRunButton();
 });
 
+/** Load subtitles from a file or from a finished job. `source` names where they came from. */
+function loadSubtitles(text: string, source: string): void {
+  state.cues = parseSubtitles(text);
+  state.spans = [];
+  state.activeCue = -1;
+  setStatus(`${state.cues.length} cues loaded from ${source}.`);
+  alignIfReady();
+  renderCueList();
+}
+
 ui.subFile.addEventListener('change', async () => {
   const file = ui.subFile.files?.[0];
   if (!file) return;
-  state.cues = parseSubtitles(await file.text());
-  state.spans = [];
-  state.activeCue = -1;
-  setStatus(`${state.cues.length} cues loaded.`);
-  alignIfReady();
-  renderCueList();
+  loadSubtitles(await file.text(), file.name);
 });
 
-ui.audioFile.addEventListener('change', () => {
-  const file = ui.audioFile.files?.[0];
-  if (!file) return;
-  ui.audio.src = URL.createObjectURL(file);
+const audiobook = setupAudiobook({
+  tokens: () => state.tokens,
+  ocrLang: () => ui.lang.value,
+  loadSrt: loadSubtitles,
 });
 
 // --- Dictionaries ---
@@ -312,6 +317,7 @@ ui.run.addEventListener('click', async () => {
       await ocr.terminate();
     }
     setStatus(`Done. ${state.tokens.length} characters read. Tap a word to look it up.`);
+    audiobook.onTokens();
     alignIfReady();
     renderCueList();
     state.activeCue = -1;

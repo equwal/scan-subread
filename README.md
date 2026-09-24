@@ -9,10 +9,12 @@ for each character. Tap a word on the page, and the app shows the
 dictionary entries for the longest word that starts at that character,
 after Japanese deinflection (食べました → 食べる).
 
-Optional: load the audiobook and its subtitle file (SRT or WebVTT). The
-app aligns each subtitle cue to the OCR text and highlights the region of
-the page that shows the current cue while the audio plays. Tap a cue in
-the list to seek the audio.
+Optional: load the audiobook. The app makes the subtitles from the
+audiobook and the OCR text, on the subread.space server or in the app
+itself (see "Audiobook"). You can also load a subtitle file (SRT or
+WebVTT) by hand. The app aligns each subtitle cue to the OCR text and
+highlights the region of the page that shows the current cue while the
+audio plays. Tap a cue in the list to seek the audio.
 
 ## Use
 
@@ -154,6 +156,74 @@ Notes:
 - Dictionaries live in the WebView's IndexedDB. Uninstalling the app
   deletes them.
 
+## Audiobook
+
+The "Audiobook" section of the menu turns an audiobook and the OCR text
+into subtitles. The subread.space service takes only epubs, not scanned
+PDFs, so the app sends the OCR text instead: one line per OCR line,
+pages in order, one blank line between pages (`src/book-text.ts`). A
+space goes between words, but not between two CJK words. Two paths make
+the subtitles. Both need a PDF with OCR done and an audio file.
+
+1. "Make subtitles on subread.space" uploads the audio and the OCR text
+   to the server (`POST /api/uploads`), starts the job with the
+   narration language, and polls the job every 5 seconds. The status
+   line shows the stage and the progress. "Stop" cancels the job. When
+   the job succeeds, the app downloads the SRT and loads it. The server
+   handles a 10-hour book in minutes. One job costs one credit. The
+   first anonymous job is free. When the server answers 402, the status
+   line shows the reason and a link to <https://subread.space>, where
+   you buy credits or sign in. The job id stays in `localStorage`, so
+   the app resumes the poll after a restart.
+2. "Make subtitles in this app" runs the SubPlz browser engine from the
+   subread.space frontend (`src/engine/`): ffmpeg.wasm decodes the audio
+   in two-minute chunks, whisper-tiny (transformers.js on the ONNX
+   runtime) transcribes them, and the aligner matches the transcript to
+   the OCR lines. This is slow on a phone: the speech model runs in
+   WebAssembly at about real time or slower, and the screen must stay
+   on. The transcript is saved after each chunk, so a stopped job
+   resumes with the same audio file. The engine assets are not in the
+   app: transformers.js, the ONNX runtime, the ffmpeg core (32 MB) and
+   the model (about 120 MB) load from the "Engine assets URL", default
+   `https://subread.space/vendor/`. The browser caches them.
+
+The narration language is a Whisper code (ja or en). The app sets it
+from the OCR language after each OCR run. The result SRT is kept in
+IndexedDB under the audio file name and size, so the next time you pick
+the same audio file the subtitles load at once.
+
+Sign in: type your email and press "Send link". The link opens
+subread.space in the browser. The app has no deep link, so paste the
+link (or the token in it) into "Paste the sign-in link or token" and
+press "Verify". The account line shows the email and the credits. On the
+web the identity is the `subplz_device` cookie of the dev proxy. On
+Android the requests run through Capacitor's native HTTP plugin
+(`src/http.ts`), because the WebView origin `https://localhost` gets no
+CORS headers from the server. The native cookie store keeps the cookie
+across restarts. The multipart upload crosses the native bridge as
+base64, so the whole audio file is in memory once during the upload.
+
+"Advanced" holds two settings for a self-hosted server: the server URL
+(default `https://subread.space`; empty on the web, where the Vite dev
+proxy forwards `/api`) and the engine assets URL.
+
+Known limit on Android: the in-app path loads the engine assets from
+another origin. That needs CORS headers on `/vendor/` of the server,
+which subread.space does not send yet. Until the server adds
+`add_header Access-Control-Allow-Origin *;` for `/vendor/` in nginx, the
+in-app path fails on the phone with a load error, and the server path is
+the one to use. On the web the Vite proxy makes `/vendor` same-origin,
+so the in-app path runs in the browser pane end to end.
+
+License note: `src/engine/*.js` is copied from the `frontend/engine/`
+directory of [equwal/subplz-web](https://github.com/equwal/subplz-web)
+(AGPL-3.0, same author). The files carry a header comment that says so.
+`align.js` and `align.worker.js` are verbatim. `asr.js`, `media.js` and
+`job.js` are adapted: the paragraphs come from the OCR lines, the assets
+load from a configurable base URL, and the ffmpeg wrapper comes from the
+`@ffmpeg/ffmpeg` package (its worker must be same-origin). The `.d.ts`
+files next to them give strict TypeScript the used signatures.
+
 ## Local audio (Android only)
 
 The lookup popup can play a recorded pronunciation of each word. The
@@ -199,6 +269,11 @@ Runtime:
   parser; the browser has no zip API.
 - `idb`: a thin Promise wrapper around IndexedDB. It replaces the
   callback and event plumbing of the raw IndexedDB API.
+- `@ffmpeg/ffmpeg`: the ffmpeg.wasm worker wrapper for the in-app
+  path. It replaces a copy of the same files from the reference's
+  `frontend/vendor/ffmpeg/`. The 32 MB core is not bundled.
+- `@capacitor/core`, `@capacitor/android`: the Android shell, the
+  LocalAudio plugin bridge and the native HTTP plugin.
 
 Development:
 
@@ -234,6 +309,14 @@ any deinflection.
 - `src/align.ts`: pure alignment of subtitle cues to OCR text.
 - `src/subtitles.ts`: pure SRT/VTT parser and active-cue lookup.
 - `src/ocr-tokens.ts`: pure conversion of a tesseract result to tokens.
+- `src/book-text.ts`: pure OCR tokens to book text and paragraphs.
+- `src/cloud.ts`: pure client for the subread.space job API over an
+  injected transport.
+- `src/http.ts`: the transports: `fetch` on the web, native HTTP on
+  Android.
+- `src/srt-cache.ts`: IndexedDB store for finished subtitles (thin).
+- `src/engine/`: the SubPlz browser engine, copied (see "Audiobook").
+- `src/audiobook.ts`: UI wiring of the "Audiobook" section.
 - `src/ocr.ts`, `src/pdf.ts`: thin browser wrappers around the libraries.
 - `src/main.ts`: UI wiring.
 - `test/`: unit and property tests. `test/e2e/`: OCR end-to-end test.
@@ -242,7 +325,8 @@ any deinflection.
 
 ## Scope limits
 
-- Web only. No backend.
+- No backend of its own. The subread.space server makes the subtitles
+  on the server path; the app talks to it as a client.
 - OCR runs on the first N pages (the "Pages to OCR" field). Tokens are
   kept in memory. They are not saved between sessions; dictionaries are.
 - The scan string is the tapped character and the characters after it on
@@ -251,7 +335,12 @@ any deinflection.
 - Alignment runs once over the whole book. It takes about 5 s for 200k
   characters at 10% OCR noise, and well under 1 s for a chapter.
 - No audiobook pause control, no iOS build.
-- The fixtures' `silence.wav` is silent. It only drives the clock.
+- The fixtures' `silence.wav` is silent. It only drives the clock. Both
+  subtitle paths fail or produce nonsense on it: the server reports
+  that no subtitle file was produced, and whisper-tiny hallucinates one
+  segment.
+- The in-app path on Android waits for CORS headers on the server's
+  `/vendor/` (see "Audiobook").
 
 ## Next steps
 
@@ -266,3 +355,6 @@ any deinflection.
    sentence, with a setting for the pause length and a key to continue.
 5. iOS: `npx cap add ios`. The web code is the same. It needs a Mac with
    Xcode.
+6. Server: CORS headers on `/vendor/`, so the in-app path runs on
+   Android. A streaming native upload, so a 10-hour audiobook does not
+   sit in memory as base64 during the upload.
