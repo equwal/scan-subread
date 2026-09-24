@@ -13,5 +13,5 @@
     "isolatedModules": true,
     "noEmit": true
   },
-  "include": ["src", "test", "scripts", "fixtures/*.ts", "vite.config.ts"]
+  "include": ["src", "test", "scripts", "fixtures/*.ts", "vite.config.ts", "capacitor.config.ts"]
 }

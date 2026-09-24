@@ -3,3 +3,12 @@ dist/
 .tessdata/
 *.traineddata
 *.traineddata.gz
+
+# Android (Capacitor) build output and local IDE state
+android/build/
+android/app/build/
+android/.gradle/
+android/local.properties
+android/.idea/
+android/*.iml
+android/app/*.iml
