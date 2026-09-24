@@ -7,13 +7,18 @@
     <link rel="stylesheet" href="/src/style.css" />
   </head>
   <body>
+    <header id="topbar">
+      <button id="menu" aria-controls="panel" aria-expanded="false">Menu</button>
+      <button id="prev">Prev</button>
+      <span id="page-label">No PDF</span>
+      <button id="next">Next</button>
+    </header>
+
     <aside id="panel">
       <h1>Scan Subread</h1>
-      <p class="hint">Load a scanned PDF, its audiobook, and a subtitle file (SRT or VTT).</p>
+      <p class="hint">Load a scanned PDF, run OCR, then tap a word on the page to look it up.</p>
 
       <label>PDF (scanned) <input id="pdf-file" type="file" accept="application/pdf" /></label>
-      <label>Audio <input id="audio-file" type="file" accept="audio/*" /></label>
-      <label>Subtitles <input id="sub-file" type="file" accept=".srt,.vtt,text/*" /></label>
       <label
         >OCR language
         <select id="lang">
@@ -24,27 +29,34 @@
         </select>
       </label>
       <label>Pages to OCR <input id="max-pages" type="number" min="1" value="3" /></label>
-      <button id="run" disabled>OCR and align</button>
+      <button id="run" disabled>OCR</button>
       <div id="status" aria-live="polite"></div>
       <progress id="progress" max="1" value="0" hidden></progress>
 
+      <label
+        >Dictionaries (Yomitan zip)
+        <input id="dict-file" type="file" accept=".zip,application/zip" multiple />
+      </label>
+      <ul id="dicts"></ul>
+
+      <label>Audio (optional) <input id="audio-file" type="file" accept="audio/*" /></label>
+      <label
+        >Subtitles (optional) <input id="sub-file" type="file" accept=".srt,.vtt,text/*"
+      /></label>
       <audio id="audio" controls></audio>
 
       <ol id="cues"></ol>
     </aside>
 
     <main id="main">
-      <nav id="pager">
-        <button id="prev">Previous</button>
-        <span id="page-label">No PDF</span>
-        <button id="next">Next</button>
-      </nav>
       <div id="viewer">
         <div id="page">
           <div id="overlay"></div>
         </div>
       </div>
     </main>
+
+    <div id="popup" hidden></div>
 
     <script type="module" src="/src/main.ts"></script>
   </body>

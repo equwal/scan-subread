@@ -5,6 +5,8 @@ const config: CapacitorConfig = {
   appId: 'com.equwal.scansubread',
   appName: 'Scan SubRead',
   webDir: 'dist',
+  // Pinch zoom on the page image.
+  zoomEnabled: true,
 };
 
 export default config;

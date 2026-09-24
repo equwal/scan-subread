@@ -1,12 +1,25 @@
-// UI wiring. All alignment logic lives in align.ts.
+// UI wiring. Alignment logic lives in align.ts, lookup logic in lookup.ts.
 
 import { alignCuesToTokens, type OcrToken, type TokenSpan } from './align';
+import {
+  deleteDictionary,
+  importDictionary,
+  listDictionaries,
+  storedFinder,
+  type FoundTerm,
+} from './dictdb';
+import { lookup, scanText, tokenAt, type LookupResult, type TermFinder } from './lookup';
 import { createOcr } from './ocr';
 import { loadPdf, type PdfDoc } from './pdf';
 import { cueIndexAt, parseSubtitles, type Cue } from './subtitles';
 
 /** Page width in pixels for OCR. Boxes are stored in this scale. */
 const OCR_WIDTH = 1600;
+
+/** How far from a character a tap may land, as a share of the page width. */
+const TAP_TOLERANCE = 0.015;
+
+const DESKTOP = window.matchMedia('(min-width: 900px)');
 
 function el<T extends HTMLElement>(id: string): T {
   const e = document.getElementById(id);
@@ -15,9 +28,13 @@ function el<T extends HTMLElement>(id: string): T {
 }
 
 const ui = {
+  menu: el<HTMLButtonElement>('menu'),
+  panel: el<HTMLElement>('panel'),
   pdfFile: el<HTMLInputElement>('pdf-file'),
   audioFile: el<HTMLInputElement>('audio-file'),
   subFile: el<HTMLInputElement>('sub-file'),
+  dictFile: el<HTMLInputElement>('dict-file'),
+  dicts: el<HTMLUListElement>('dicts'),
   lang: el<HTMLSelectElement>('lang'),
   maxPages: el<HTMLInputElement>('max-pages'),
   run: el<HTMLButtonElement>('run'),
@@ -31,6 +48,7 @@ const ui = {
   viewer: el<HTMLDivElement>('viewer'),
   page: el<HTMLDivElement>('page'),
   overlay: el<HTMLDivElement>('overlay'),
+  popup: el<HTMLDivElement>('popup'),
 };
 
 interface PageSize {
@@ -49,6 +67,8 @@ const state = {
   activeCue: -1,
   busy: false,
   renderSeq: 0,
+  /** Term finder over the stored dictionaries. Null when none is imported. */
+  finder: null as TermFinder<FoundTerm> | null,
 };
 
 function setStatus(text: string): void {
@@ -56,8 +76,17 @@ function setStatus(text: string): void {
 }
 
 function updateRunButton(): void {
-  ui.run.disabled = state.busy || !state.pdf || state.cues.length === 0;
+  ui.run.disabled = state.busy || !state.pdf;
 }
+
+// --- Drawer ---
+
+function setMenu(open: boolean): void {
+  document.body.classList.toggle('menu-open', open);
+  ui.menu.setAttribute('aria-expanded', String(open));
+}
+
+ui.menu.addEventListener('click', () => setMenu(!document.body.classList.contains('menu-open')));
 
 // --- Loading inputs ---
 
@@ -71,7 +100,7 @@ ui.pdfFile.addEventListener('change', async () => {
     state.spans = [];
     state.pageSizes = [];
     state.activeCue = -1;
-    setStatus(`PDF loaded: ${state.pdf.numPages} pages.`);
+    setStatus(`PDF loaded: ${state.pdf.numPages} pages. Run OCR, then tap words on the page.`);
     await showPage(0);
   } catch (err) {
     setStatus(`Cannot open PDF: ${String(err)}`);
@@ -85,15 +114,56 @@ ui.subFile.addEventListener('change', async () => {
   state.cues = parseSubtitles(await file.text());
   state.spans = [];
   state.activeCue = -1;
-  renderCueList();
   setStatus(`${state.cues.length} cues loaded.`);
-  updateRunButton();
+  alignIfReady();
+  renderCueList();
 });
 
 ui.audioFile.addEventListener('change', () => {
   const file = ui.audioFile.files?.[0];
   if (!file) return;
   ui.audio.src = URL.createObjectURL(file);
+});
+
+// --- Dictionaries ---
+
+async function refreshDictionaries(): Promise<void> {
+  const rows = await listDictionaries();
+  state.finder = rows.length > 0 ? await storedFinder() : null;
+  ui.dicts.replaceChildren(
+    ...rows.map((row) => {
+      const li = document.createElement('li');
+      const name = document.createElement('span');
+      name.textContent = `${row.title} (${row.termCount} terms)`;
+      const del = document.createElement('button');
+      del.textContent = 'Delete';
+      del.addEventListener('click', async () => {
+        del.disabled = true;
+        setStatus(`Deleting ${row.title}...`);
+        await deleteDictionary(row.id);
+        setStatus(`Deleted ${row.title}.`);
+        await refreshDictionaries();
+      });
+      li.append(name, del);
+      return li;
+    }),
+  );
+}
+
+ui.dictFile.addEventListener('change', async () => {
+  const files = [...(ui.dictFile.files ?? [])];
+  ui.dictFile.value = '';
+  for (const file of files) {
+    try {
+      setStatus(`Reading ${file.name}...`);
+      const zip = new Uint8Array(await file.arrayBuffer());
+      const row = await importDictionary(zip, setStatus);
+      setStatus(`Imported ${row.title}: ${row.termCount} terms.`);
+    } catch (err) {
+      setStatus(`Import of ${file.name} failed: ${String(err)}`);
+    }
+  }
+  await refreshDictionaries();
 });
 
 // --- OCR and alignment ---
@@ -123,17 +193,11 @@ ui.run.addEventListener('click', async () => {
     } finally {
       await ocr.terminate();
     }
-    state.spans = alignCuesToTokens(
-      state.cues.map((c) => c.text),
-      state.tokens,
-    );
-    const matched = state.spans.filter((s) => s.matched).length;
-    setStatus(
-      `Done. ${state.tokens.length} characters read. ${matched}/${state.cues.length} cues matched.`,
-    );
+    setStatus(`Done. ${state.tokens.length} characters read. Tap a word to look it up.`);
+    alignIfReady();
     renderCueList();
     state.activeCue = -1;
-    await setActiveCue(0);
+    if (state.spans.length > 0) await setActiveCue(0);
   } catch (err) {
     setStatus(`OCR failed: ${String(err)}`);
   } finally {
@@ -142,6 +206,17 @@ ui.run.addEventListener('click', async () => {
     updateRunButton();
   }
 });
+
+/** Align the cues to the OCR text when both are present. */
+function alignIfReady(): void {
+  if (state.cues.length === 0 || state.tokens.length === 0) return;
+  state.spans = alignCuesToTokens(
+    state.cues.map((c) => c.text),
+    state.tokens,
+  );
+  const matched = state.spans.filter((s) => s.matched).length;
+  setStatus(`${matched}/${state.cues.length} cues matched to the page text.`);
+}
 
 // --- Cue list ---
 
@@ -190,12 +265,13 @@ async function showPage(index: number): Promise<void> {
   const seq = ++state.renderSeq;
   state.currentPage = index;
   ui.pageLabel.textContent = `Page ${index + 1} / ${pdf.numPages}`;
+  hidePopup();
+  // Render at device resolution, up to the OCR width, so zoom stays sharp.
   const dpr = window.devicePixelRatio || 1;
-  const width = Math.round(Math.min(OCR_WIDTH, Math.max(300, ui.viewer.clientWidth - 32) * dpr));
+  const width = Math.round(Math.min(OCR_WIDTH, Math.max(300, ui.viewer.clientWidth - 16) * dpr));
   const canvas = await pdf.renderPage(index, width);
   if (seq !== state.renderSeq) return; // A newer render replaced this one.
   ui.page.querySelector('canvas')?.remove();
-  canvas.addEventListener('click', onPageClick);
   ui.page.prepend(canvas);
   drawBoxes();
 }
@@ -231,32 +307,95 @@ function drawBoxes(): void {
   }
 }
 
-/** Click on the page: seek to the cue that covers the clicked character. */
-function onPageClick(e: MouseEvent): void {
-  const canvas = e.currentTarget as HTMLCanvasElement;
+ui.prev.addEventListener('click', () => void showPage(state.currentPage - 1));
+ui.next.addEventListener('click', () => void showPage(state.currentPage + 1));
+
+// --- Tap to look up ---
+
+/** Tap on the page: look up the word under the tap. */
+ui.page.addEventListener('click', async (e) => {
+  const canvas = ui.page.querySelector('canvas');
   const size = state.pageSizes[state.currentPage];
-  if (!size) return;
+  if (!canvas || !size) {
+    hidePopup();
+    return;
+  }
   const rect = canvas.getBoundingClientRect();
   const x = ((e.clientX - rect.left) / rect.width) * size.width;
   const y = ((e.clientY - rect.top) / rect.height) * size.height;
-  const t = state.tokens.findIndex(
-    (tok) =>
-      tok.page === state.currentPage &&
-      x >= tok.bbox.x0 &&
-      x <= tok.bbox.x1 &&
-      y >= tok.bbox.y0 &&
-      y <= tok.bbox.y1,
-  );
-  if (t < 0) return;
-  const i = state.spans.findIndex((s) => t >= s.start && t < s.end);
-  const cue = state.cues[i];
-  if (!cue) return;
-  ui.audio.currentTime = cue.start;
-  void setActiveCue(i);
+  const t = tokenAt(state.tokens, state.currentPage, x, y, TAP_TOLERANCE * size.width);
+  if (t < 0) {
+    hidePopup();
+    return;
+  }
+  const text = scanText(state.tokens, t);
+  if (!state.finder) {
+    showPopup(e, text, []);
+    return;
+  }
+  showPopup(e, text, await lookup(text, state.finder));
+});
+
+function showPopup(e: MouseEvent, text: string, results: LookupResult<FoundTerm>[]): void {
+  const entries = results.map((r) => {
+    const term = r.term;
+    const div = document.createElement('div');
+    div.className = 'entry';
+    const head = document.createElement('div');
+    head.className = 'head';
+    head.textContent = term.expression;
+    const reading = document.createElement('div');
+    reading.className = 'reading';
+    reading.textContent = term.reading && term.reading !== term.expression ? term.reading : '';
+    const meta = document.createElement('div');
+    meta.className = 'meta';
+    const via = r.rules.length > 0 ? ` (${r.surface}: ${r.rules.join(' < ')})` : '';
+    meta.textContent = `${term.dictTitle}${via}`;
+    const list = document.createElement('ul');
+    for (const line of term.glossary) {
+      const li = document.createElement('li');
+      li.textContent = line;
+      list.append(li);
+    }
+    div.append(head, reading, meta, list);
+    return div;
+  });
+  if (entries.length === 0) {
+    const p = document.createElement('div');
+    p.className = 'meta';
+    p.textContent = state.finder
+      ? `No entry for "${text}".`
+      : 'Import a dictionary to look up words.';
+    entries.push(p);
+  }
+  ui.popup.replaceChildren(...entries);
+  ui.popup.hidden = false;
+  if (DESKTOP.matches) {
+    const width = ui.popup.offsetWidth;
+    ui.popup.style.left = `${Math.min(e.clientX + 12, window.innerWidth - width - 8)}px`;
+    ui.popup.style.top = `${Math.min(e.clientY + 12, window.innerHeight - ui.popup.offsetHeight - 8)}px`;
+  } else {
+    ui.popup.style.left = '';
+    ui.popup.style.top = '';
+  }
 }
 
-ui.prev.addEventListener('click', () => void showPage(state.currentPage - 1));
-ui.next.addEventListener('click', () => void showPage(state.currentPage + 1));
+function hidePopup(): void {
+  ui.popup.hidden = true;
+}
+
+// A tap outside the popup closes it. A tap outside the drawer closes the drawer.
+document.addEventListener('click', (e) => {
+  const target = e.target as Node;
+  if (!ui.popup.contains(target) && !ui.page.contains(target)) hidePopup();
+  if (
+    document.body.classList.contains('menu-open') &&
+    !ui.panel.contains(target) &&
+    !ui.menu.contains(target)
+  ) {
+    setMenu(false);
+  }
+});
 
 // --- Playback sync ---
 
@@ -267,3 +406,6 @@ ui.audio.addEventListener('timeupdate', () => {
 });
 
 updateRunButton();
+void refreshDictionaries().catch((err) =>
+  setStatus(`Cannot open dictionary store: ${String(err)}`),
+);

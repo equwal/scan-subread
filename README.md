@@ -1,24 +1,45 @@
 # Scan Subread
 
-A web prototype that reads a scanned book along with its audiobook.
+A reader for scanned books with tap-to-look-up. It runs in a browser and
+as an Android app.
 
-You load three files:
+You load a scanned PDF (page images, no text layer) and one or more
+Yomitan dictionaries. The app renders the pages and runs OCR to get a box
+for each character. Tap a word on the page, and the app shows the
+dictionary entries for the longest word that starts at that character,
+after Japanese deinflection (食べました → 食べる).
 
-1. A scanned PDF (page images, no text layer).
-2. The audiobook audio file.
-3. A subtitle file (SRT or WebVTT) with the timed lines of that audio.
+Optional: load the audiobook and its subtitle file (SRT or WebVTT). The
+app aligns each subtitle cue to the OCR text and highlights the region of
+the page that shows the current cue while the audio plays. Tap a cue in
+the list to seek the audio.
 
-The app renders the pages, runs OCR to get a box for each character, and
-aligns each subtitle cue to the OCR text. During playback, the region of
-the page image that shows the current cue is highlighted. Click a cue in
-the list, or click text on the page, to seek the audio to that cue.
+## Use
 
-OCR text is noisy. The alignment tolerates errors: it normalizes both
-sides (NFKC, lowercase, letters and digits only), runs a character-level
-diff between the joined cue text and the OCR text, and uses equal runs as
-anchors. The output is monotonic: cue N always ends before cue N+1 starts.
-The method is language-agnostic. Japanese (horizontal and vertical) and
-English are the target scripts.
+1. Open the menu (the "Menu" button on a phone; the left panel on a
+   desktop).
+2. Load a PDF with "PDF (scanned)". Pick the OCR language.
+3. Press "OCR". The first run downloads the OCR engine and the language
+   data (see Notes). The status line shows the progress.
+4. Load a dictionary with "Dictionaries (Yomitan zip)". You can pick
+   several zips at once. The list under the field shows each imported
+   dictionary with a Delete button. Dictionaries stay in the browser's
+   IndexedDB across restarts, so you import each one once.
+5. Close the menu and tap a word on the page. On a phone the entries
+   appear in a sheet at the bottom. On a desktop they appear next to the
+   tap. Tap anywhere else to close it.
+
+Where to get dictionaries: Yomitan dictionaries are zip files with
+`index.json` and `term_bank_N.json` inside. Use the zips that you use with
+the Yomitan browser extension. The app reads the term banks only. Kanji
+banks, tag banks and term meta banks (frequency, pitch) are ignored, so a
+kanji-only or frequency-only dictionary imports zero terms.
+`fixtures/test-dict.zip` is a 13-term sample that covers the words on
+`fixtures/sample-jpn.pdf`.
+
+OCR text is noisy. The character boxes that Tesseract returns for Japanese
+overlap and are sometimes shifted by half a character. When a tap picks
+the wrong character, tap a little to the left or the right.
 
 ## Run
 
@@ -30,9 +51,10 @@ npm install
 npm run dev
 ```
 
-Open the URL that Vite prints. Try the synthetic fixtures in `fixtures/`:
-`sample-eng.pdf` + `sample-eng.srt` + `silence.wav` (or the `sample-jpn`
-pair with the "Japanese, horizontal" OCR language).
+Open the URL that Vite prints. Try the fixtures in `fixtures/`:
+`sample-jpn.pdf` with the "Japanese, horizontal" OCR language and
+`test-dict.zip`. For the audio feature add `sample-jpn.srt` and
+`silence.wav` (or the `sample-eng` pair with English).
 
 The first OCR run downloads the tesseract worker, its WebAssembly core and
 the language data from jsDelivr. The browser caches the language data in
@@ -65,7 +87,8 @@ network. `npm run test:e2e` runs real OCR on the fixture images in Node
 and checks that every cue is highlighted on the correct line. It needs
 network on the first run to fetch language data into `.tessdata/`.
 
-`npm run fixtures` rebuilds the fixtures from `fixtures/sample-text.ts`.
+`npm run fixtures` rebuilds the fixtures from `fixtures/sample-text.ts`
+and `fixtures/test-dict.ts`.
 
 ## Android
 
@@ -116,14 +139,19 @@ adb install -r android/app/build/outputs/apk/debug/app-debug.apk
 
 Notes:
 
-- The WebView serves the app from `https://localhost`. The three
-  `<input type="file">` fields open the Android file chooser.
+- The WebView serves the app from `https://localhost`. The file fields
+  open the Android file chooser. Put your PDFs and dictionary zips in
+  `Download` to find them fast.
 - The first OCR run needs network. tesseract.js fetches its worker, its
   WebAssembly core and the language data from jsDelivr over HTTPS. The
   `INTERNET` permission is in the manifest. No cleartext traffic setting
   is needed.
 - The pdf.js worker is part of the bundle.
-- The APK builds. It is not yet tested on a device.
+- Pinch zoom is on (`zoomEnabled` in `capacitor.config.ts`). The page
+  fits the screen width in portrait and the screen height in landscape.
+  Zoom in and scroll to read small print.
+- Dictionaries live in the WebView's IndexedDB. Uninstalling the app
+  deletes them.
 
 ## Dependencies
 
@@ -132,6 +160,10 @@ Runtime:
 - `pdfjs-dist`: renders PDF pages to a canvas.
 - `tesseract.js`: OCR in a Web Worker. Returns a box for each symbol.
 - `fast-diff`: character-level Myers diff. The alignment is built on it.
+- `fflate`: reads the dictionary zips. It replaces a hand-written zip
+  parser; the browser has no zip API.
+- `idb`: a thin Promise wrapper around IndexedDB. It replaces the
+  callback and event plumbing of the raw IndexedDB API.
 
 Development:
 
@@ -145,24 +177,41 @@ The SRT/VTT parser is written by hand (`src/subtitles.ts`). The `subtitle`
 package imports the Node `stream` module at load time, so it does not run
 in a browser bundle.
 
+The deinflector (`src/deinflect.ts`) is a small hand-written rule table,
+not Yomitan's. It covers the common verb and i-adjective inflections and
+chains up to three rules. A dictionary term's `rules` field (v1, v5,
+adj-i, ...) must allow the deinflection; a term with no rules matches
+any deinflection.
+
 ## Layout
 
-- `src/align.ts`: pure alignment. No DOM. This is the core.
+- `src/lookup.ts`: pure tap-to-look-up. Hit test, scan string, longest
+  match with deinflection.
+- `src/deinflect.ts`: pure Japanese deinflection rules.
+- `src/yomitan.ts`: pure Yomitan zip reader. Term banks and glossary
+  text, one bank at a time.
+- `src/dictdb.ts`: IndexedDB store for dictionaries and terms (thin, no
+  tests).
+- `src/align.ts`: pure alignment of subtitle cues to OCR text.
 - `src/subtitles.ts`: pure SRT/VTT parser and active-cue lookup.
 - `src/ocr-tokens.ts`: pure conversion of a tesseract result to tokens.
 - `src/ocr.ts`, `src/pdf.ts`: thin browser wrappers around the libraries.
 - `src/main.ts`: UI wiring.
 - `test/`: unit and property tests. `test/e2e/`: OCR end-to-end test.
-- `fixtures/`, `scripts/make-fixtures.ts`: synthetic scanned pages.
+- `fixtures/`, `scripts/make-fixtures.ts`: synthetic scanned pages and
+  the sample dictionary.
 
 ## Scope limits
 
 - Web only. No backend.
 - OCR runs on the first N pages (the "Pages to OCR" field). Tokens are
-  kept in memory. Nothing is saved between sessions.
+  kept in memory. They are not saved between sessions; dictionaries are.
+- The scan string is the tapped character and the characters after it on
+  the same OCR line, up to 16 characters. A word that wraps to the next
+  line is not found.
 - Alignment runs once over the whole book. It takes about 5 s for 200k
   characters at 10% OCR noise, and well under 1 s for a chapter.
-- No dictionary lookup, no audiobook pause control, no iOS build.
+- No audiobook pause control, no iOS build.
 - The fixtures' `silence.wav` is silent. It only drives the clock.
 
 ## Next steps
@@ -171,11 +220,10 @@ in a browser bundle.
    and the language data in the app bundle (`workerPath`, `corePath`,
    `langPath` options of `createWorker`), so the first OCR run needs no
    network.
-2. Yomitan dictionary: put an invisible text layer over the page from the
-   OCR boxes, so Yomitan's browser extension can scan it. For a packaged
-   app, embed a dictionary lookup that reads Yomitan dictionary zips.
-3. Audiobook pause behavior: pause at the end of each cue, or after a
+2. Persistence: cache OCR tokens per book in IndexedDB, so a book is
+   OCR'd once.
+3. Kanji banks and frequency data from the dictionary zips.
+4. Audiobook pause behavior: pause at the end of each cue, or after a
    sentence, with a setting for the pause length and a key to continue.
-4. Persistence: cache OCR tokens and the alignment per book in IndexedDB.
 5. iOS: `npx cap add ios`. The web code is the same. It needs a Mac with
    Xcode.
