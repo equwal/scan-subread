@@ -24,7 +24,10 @@ export async function loadPdf(data: ArrayBuffer): Promise<PdfDoc> {
       const canvas = document.createElement('canvas');
       canvas.width = Math.ceil(viewport.width);
       canvas.height = Math.ceil(viewport.height);
-      await page.render({ canvas, viewport }).promise;
+      // The "display" intent paces rendering with requestAnimationFrame,
+      // which stops in a hidden tab. OCR runs for a long time, so use the
+      // "print" intent, which renders without it.
+      await page.render({ canvas, viewport, intent: 'print' }).promise;
       return canvas;
     },
     destroy: () => task.destroy(),
