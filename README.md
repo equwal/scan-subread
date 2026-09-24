@@ -67,6 +67,64 @@ network on the first run to fetch language data into `.tessdata/`.
 
 `npm run fixtures` rebuilds the fixtures from `fixtures/sample-text.ts`.
 
+## Android
+
+Capacitor wraps the web build in an Android WebView. The app is the same
+code. Nothing is native. `capacitor.config.ts` holds the app id, the app
+name and the web directory. The `android/` project is the Capacitor
+template and is committed.
+
+Prerequisites:
+
+- JDK 21 (`JAVA_HOME` set).
+- Android SDK with platform 36 and build-tools 35 or newer.
+- `ANDROID_HOME` set to the SDK path, or `android/local.properties`
+  with `sdk.dir=C:\\Android\\Sdk` (the file is not committed).
+
+Build the web app and copy it into the Android project:
+
+```bash
+npm run android:sync
+```
+
+Build the debug APK (the first run downloads Gradle and its dependencies):
+
+```bash
+npm run android:build
+```
+
+In PowerShell, set the SDK path first when `ANDROID_HOME` is not set:
+
+```bash
+$env:ANDROID_HOME = 'C:\Android\Sdk'; npm run android:build
+```
+
+If Gradle fails with `Unable to establish loopback connection`, the JDK
+cannot open a Unix domain socket in the user temp directory. Point it to
+a different directory for the build:
+
+```bash
+$env:JAVA_TOOL_OPTIONS = '-Djdk.net.unixdomain.tmpdir=C:\Windows\Temp'; $env:ANDROID_HOME = 'C:\Android\Sdk'; npm run android:build
+```
+
+The APK lands at `android/app/build/outputs/apk/debug/app-debug.apk`.
+Install it on a connected phone with USB debugging on:
+
+```bash
+adb install -r android/app/build/outputs/apk/debug/app-debug.apk
+```
+
+Notes:
+
+- The WebView serves the app from `https://localhost`. The three
+  `<input type="file">` fields open the Android file chooser.
+- The first OCR run needs network. tesseract.js fetches its worker, its
+  WebAssembly core and the language data from jsDelivr over HTTPS. The
+  `INTERNET` permission is in the manifest. No cleartext traffic setting
+  is needed.
+- The pdf.js worker is part of the bundle.
+- The APK builds. It is not yet tested on a device.
+
 ## Dependencies
 
 Runtime:
@@ -104,17 +162,20 @@ in a browser bundle.
   kept in memory. Nothing is saved between sessions.
 - Alignment runs once over the whole book. It takes about 5 s for 200k
   characters at 10% OCR noise, and well under 1 s for a chapter.
-- No dictionary lookup, no audiobook pause control, no mobile build.
+- No dictionary lookup, no audiobook pause control, no iOS build.
 - The fixtures' `silence.wav` is silent. It only drives the clock.
 
 ## Next steps
 
-1. Yomitan dictionary: put an invisible text layer over the page from the
+1. Offline OCR on Android: put the tesseract worker, the WebAssembly core
+   and the language data in the app bundle (`workerPath`, `corePath`,
+   `langPath` options of `createWorker`), so the first OCR run needs no
+   network.
+2. Yomitan dictionary: put an invisible text layer over the page from the
    OCR boxes, so Yomitan's browser extension can scan it. For a packaged
    app, embed a dictionary lookup that reads Yomitan dictionary zips.
-2. Audiobook pause behavior: pause at the end of each cue, or after a
+3. Audiobook pause behavior: pause at the end of each cue, or after a
    sentence, with a setting for the pause length and a key to continue.
-3. Persistence: cache OCR tokens and the alignment per book in IndexedDB.
-4. Android and iOS: wrap the web build with Capacitor. Tesseract runs in
-   WebAssembly, so the same code runs on both. Store language data in the
-   app bundle so OCR works offline.
+4. Persistence: cache OCR tokens and the alignment per book in IndexedDB.
+5. iOS: `npx cap add ios`. The web code is the same. It needs a Mac with
+   Xcode.
