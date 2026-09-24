@@ -18,6 +18,8 @@ export interface OcrToken {
   page: number;
   /** Line id. Tokens with the same line id lie on one visual line. */
   line: number;
+  /** Word id. Tokens with the same word id form one OCR word. Absent for hand-made tokens. */
+  word?: number;
   bbox: { x0: number; y0: number; x1: number; y1: number };
 }
 
