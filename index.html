@@ -39,6 +39,20 @@
       </label>
       <ul id="dicts"></ul>
 
+      <section id="local-audio">
+        <h2>Local audio (android.db)</h2>
+        <div id="la-status" class="hint">Local audio: checking...</div>
+        <div class="row">
+          <button id="la-import" disabled>Import</button>
+          <button id="la-remove" disabled>Remove</button>
+        </div>
+        <progress id="la-progress" max="1" value="0" hidden></progress>
+        <p class="hint">
+          Or copy the file by hand to
+          <code>Android/data/com.equwal.scansubread/files/android.db</code>.
+        </p>
+      </section>
+
       <label>Audio (optional) <input id="audio-file" type="file" accept="audio/*" /></label>
       <label
         >Subtitles (optional) <input id="sub-file" type="file" accept=".srt,.vtt,text/*"

@@ -8,6 +8,15 @@ import {
   storedFinder,
   type FoundTerm,
 } from './dictdb';
+import {
+  choices,
+  dataUrl,
+  isAndroid,
+  LocalAudio,
+  uniqueWords,
+  type LocalAudioStatus,
+  type Word,
+} from './local-audio';
 import { lookup, scanText, tokenAt, type LookupResult, type TermFinder } from './lookup';
 import { createOcr } from './ocr';
 import { loadPdf, type PdfDoc } from './pdf';
@@ -35,6 +44,10 @@ const ui = {
   subFile: el<HTMLInputElement>('sub-file'),
   dictFile: el<HTMLInputElement>('dict-file'),
   dicts: el<HTMLUListElement>('dicts'),
+  laStatus: el<HTMLDivElement>('la-status'),
+  laImport: el<HTMLButtonElement>('la-import'),
+  laRemove: el<HTMLButtonElement>('la-remove'),
+  laProgress: el<HTMLProgressElement>('la-progress'),
   lang: el<HTMLSelectElement>('lang'),
   maxPages: el<HTMLInputElement>('max-pages'),
   run: el<HTMLButtonElement>('run'),
@@ -69,6 +82,10 @@ const state = {
   renderSeq: 0,
   /** Term finder over the stored dictionaries. Null when none is imported. */
   finder: null as TermFinder<FoundTerm> | null,
+  /** True when a local-audio android.db is in place. */
+  localAudio: false,
+  /** Counts popups, so audio buttons from a stale lookup are dropped. */
+  popupSeq: 0,
 };
 
 function setStatus(text: string): void {
@@ -165,6 +182,107 @@ ui.dictFile.addEventListener('change', async () => {
   }
   await refreshDictionaries();
 });
+
+// --- Local audio (android.db) ---
+
+function showLocalAudioStatus(status: LocalAudioStatus): void {
+  state.localAudio = status.available;
+  ui.laImport.disabled = !isAndroid;
+  ui.laRemove.disabled = !status.available;
+  if (!isAndroid) {
+    ui.laStatus.textContent = 'Local audio: Android only.';
+  } else if (status.available) {
+    const mb = (status.sizeBytes / (1024 * 1024)).toFixed(1);
+    ui.laStatus.textContent = `Local audio: ${status.path} (${mb} MB)`;
+  } else {
+    ui.laStatus.textContent = 'Local audio: not set up.';
+  }
+}
+
+async function refreshLocalAudio(): Promise<void> {
+  const status = await LocalAudio.status();
+  console.log('LocalAudio status', JSON.stringify(status));
+  showLocalAudioStatus(status);
+}
+
+ui.laImport.addEventListener('click', async () => {
+  ui.laImport.disabled = true;
+  ui.laProgress.hidden = false;
+  ui.laProgress.value = 0;
+  try {
+    ui.laStatus.textContent = 'Local audio: importing...';
+    showLocalAudioStatus(await LocalAudio.importDb());
+  } catch (err) {
+    ui.laStatus.textContent = `Local audio: ${(err as Error).message ?? String(err)}`;
+    ui.laRemove.disabled = !state.localAudio;
+  } finally {
+    ui.laProgress.hidden = true;
+    ui.laImport.disabled = false;
+  }
+});
+
+ui.laRemove.addEventListener('click', async () => {
+  ui.laRemove.disabled = true;
+  try {
+    showLocalAudioStatus(await LocalAudio.remove());
+  } catch (err) {
+    ui.laStatus.textContent = `Local audio: ${(err as Error).message ?? String(err)}`;
+  }
+});
+
+if (isAndroid) {
+  void LocalAudio.addListener('importProgress', ({ copied, total }) => {
+    ui.laProgress.value = total > 0 ? copied / total : 0;
+    const mb = (copied / (1024 * 1024)).toFixed(0);
+    ui.laStatus.textContent = `Local audio: importing, ${mb} MB copied...`;
+  });
+}
+
+/** Play one pronunciation clip. The plugin returns it as base64. */
+async function playClip(file: string, source: string): Promise<void> {
+  const { data } = await LocalAudio.audio({ file, source });
+  await new Audio(dataUrl(file, data)).play();
+}
+
+/** Key of the audio slot map: one per expression and reading. */
+function wordKey(word: Word): string {
+  return `${word.expression}\t${word.reading}`;
+}
+
+/**
+ * Add a play button per audio source under each entry. Runs after the
+ * popup is on screen. `slots` maps a word key to the entry containers.
+ */
+async function addAudioButtons(
+  seq: number,
+  words: readonly Word[],
+  slots: Map<string, HTMLElement[]>,
+): Promise<void> {
+  for (const word of uniqueWords(words)) {
+    let entries;
+    try {
+      ({ entries } = await LocalAudio.lookup({
+        expression: word.expression,
+        ...(word.reading ? { reading: word.reading } : {}),
+      }));
+    } catch (err) {
+      console.warn('LocalAudio lookup failed', err);
+      return;
+    }
+    if (seq !== state.popupSeq) return; // A newer popup replaced this one.
+    for (const slot of slots.get(wordKey(word)) ?? []) {
+      for (const choice of choices(entries)) {
+        const btn = document.createElement('button');
+        btn.type = 'button';
+        btn.textContent = `▶ ${choice.label}`;
+        btn.addEventListener('click', () => {
+          playClip(choice.file, choice.source).catch((err) => setStatus(String(err)));
+        });
+        slot.append(btn);
+      }
+    }
+  }
+}
 
 // --- OCR and alignment ---
 
@@ -337,6 +455,8 @@ ui.page.addEventListener('click', async (e) => {
 });
 
 function showPopup(e: MouseEvent, text: string, results: LookupResult<FoundTerm>[]): void {
+  const seq = ++state.popupSeq;
+  const slots = new Map<string, HTMLElement[]>();
   const entries = results.map((r) => {
     const term = r.term;
     const div = document.createElement('div');
@@ -357,7 +477,11 @@ function showPopup(e: MouseEvent, text: string, results: LookupResult<FoundTerm>
       li.textContent = line;
       list.append(li);
     }
-    div.append(head, reading, meta, list);
+    const audio = document.createElement('div');
+    audio.className = 'audio';
+    div.append(head, reading, meta, audio, list);
+    const key = wordKey(term);
+    slots.set(key, [...(slots.get(key) ?? []), audio]);
     return div;
   });
   if (entries.length === 0) {
@@ -377,6 +501,14 @@ function showPopup(e: MouseEvent, text: string, results: LookupResult<FoundTerm>
   } else {
     ui.popup.style.left = '';
     ui.popup.style.top = '';
+  }
+  // The audio lookup runs after the popup is on screen, so the popup stays quick.
+  if (state.localAudio && results.length > 0) {
+    void addAudioButtons(
+      seq,
+      results.map((r) => r.term),
+      slots,
+    );
   }
 }
 
@@ -409,3 +541,6 @@ updateRunButton();
 void refreshDictionaries().catch((err) =>
   setStatus(`Cannot open dictionary store: ${String(err)}`),
 );
+void refreshLocalAudio().catch((err) => {
+  ui.laStatus.textContent = `Local audio: ${String(err)}`;
+});

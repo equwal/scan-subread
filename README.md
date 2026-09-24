@@ -93,7 +93,8 @@ and `fixtures/test-dict.ts`.
 ## Android
 
 Capacitor wraps the web build in an Android WebView. The app is the same
-code. Nothing is native. `capacitor.config.ts` holds the app id, the app
+code. The one native part is the local-audio plugin (see "Local audio"
+below). `capacitor.config.ts` holds the app id, the app
 name and the web directory. The `android/` project is the Capacitor
 template and is committed.
 
@@ -153,6 +154,40 @@ Notes:
 - Dictionaries live in the WebView's IndexedDB. Uninstalling the app
   deletes them.
 
+## Local audio (Android only)
+
+The lookup popup can play a recorded pronunciation of each word. The
+recordings come from a Yomitan local-audio `android.db` file: one SQLite
+file, often 5 to 13 GB, with a table of words and a table of audio clips
+(mp3, ogg or opus). It is the same file that Hoshi Reader imports. You
+make it with the tooling of the
+[local-audio-yomichan](https://github.com/yomidevs/local-audio-yomichan)
+project. The app does not ship any recordings.
+
+The file is too big for the WebView, so a small native plugin
+(`android/app/src/main/java/com/equwal/scansubread/LocalAudioPlugin.java`)
+opens it read-only with the Android SQLite API and returns one clip at a
+time. The plugin looks for the file at two places, in this order:
+
+1. `Android/data/com.equwal.scansubread/files/android.db` on the shared
+   storage. Copy the file there by hand with a file manager or `adb push`.
+   No import step; no second copy of the file.
+2. The app's private files directory. "Import" in the "Local audio
+   (android.db)" section of the menu opens the system file picker and
+   streams the picked file into this directory. The copy takes a while for
+   a large file; the progress bar shows how far it is. The import refuses
+   to start when the free space is less than the file size. "Remove"
+   deletes this copy. Uninstalling the app deletes it too.
+
+When a file is in place, the section shows its path and size, and each
+entry in the lookup popup gets one play button per audio source (NHK,
+Forvo speakers, and so on). The lookup runs after the popup is on screen,
+so the popup stays quick. On the web the section says "Android only".
+
+The plugin has no unit tests; it needs a device. `src/local-audio.ts`
+holds the typed bridge and the pure parts (MIME type from the file name,
+one button per source), and those have tests.
+
 ## Dependencies
 
 Runtime:
@@ -192,6 +227,10 @@ any deinflection.
   text, one bank at a time.
 - `src/dictdb.ts`: IndexedDB store for dictionaries and terms (thin, no
   tests).
+- `src/local-audio.ts`: typed bridge to the LocalAudio plugin and the
+  pure helpers for the play buttons.
+- `android/app/src/main/java/com/equwal/scansubread/LocalAudioPlugin.java`:
+  the native SQLite reader for `android.db`.
 - `src/align.ts`: pure alignment of subtitle cues to OCR text.
 - `src/subtitles.ts`: pure SRT/VTT parser and active-cue lookup.
 - `src/ocr-tokens.ts`: pure conversion of a tesseract result to tokens.
