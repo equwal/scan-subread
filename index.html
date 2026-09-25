@@ -12,13 +12,61 @@
       <button id="prev">Prev</button>
       <span id="page-label">No PDF</span>
       <button id="next">Next</button>
+      <button id="play" title="Play or pause the audiobook" disabled>▶</button>
+      <button id="sync-page" title="Move the audio to the first cue on this page" disabled>
+        Audio → page
+      </button>
     </header>
 
     <aside id="panel">
       <h1>Scan Subread</h1>
-      <p class="hint">Load a scanned PDF, run OCR, then tap a word on the page.</p>
+      <p class="hint">
+        Load a PDF and the subtitles of its audiobook. The page follows the player. Tap a word to
+        look it up.
+      </p>
 
-      <label>PDF (scanned) <input id="pdf-file" type="file" accept="application/pdf" /></label>
+      <label>PDF (scan or text) <input id="pdf-file" type="file" accept="application/pdf" /></label>
+      <label
+        >Subtitles (.srt or .vtt) <input id="sub-file" type="file" accept=".srt,.vtt,text/*"
+      /></label>
+
+      <section id="make" hidden>
+        <div class="row">
+          <button id="make-subs" disabled>Make subtitles with SubRead</button>
+          <select id="sub-lang" title="Narration language">
+            <option value="auto">auto</option>
+            <option value="ja">ja</option>
+            <option value="en">en</option>
+          </select>
+        </div>
+        <div id="make-status" class="hint"></div>
+      </section>
+
+      <div id="srt-row" class="row" hidden>
+        <a id="srt-download" download>Download the .srt</a>
+        <button id="srt-share" hidden>Share the .srt</button>
+      </div>
+
+      <section id="audio-row">
+        <label>Audio (web only) <input id="audio-file" type="file" accept="audio/*" /></label>
+        <audio id="audio" controls></audio>
+      </section>
+
+      <div id="player-status" class="hint">Player: not read yet.</div>
+      <div id="pages-status" class="hint"></div>
+      <div id="status" aria-live="polite"></div>
+      <progress id="progress" max="1" value="0" hidden></progress>
+
+      <fieldset id="follow">
+        <legend>Follow the audio</legend>
+        <label
+          ><input type="radio" name="follow" value="highlight" checked /> Highlight and turn
+          pages</label
+        >
+        <label><input type="radio" name="follow" value="pages" /> Turn pages only</label>
+        <label><input type="radio" name="follow" value="off" /> Off</label>
+      </fieldset>
+
       <label
         >OCR language
         <select id="lang">
@@ -28,19 +76,22 @@
           <option value="jpn+eng">Japanese + English</option>
         </select>
       </label>
-      <label>Pages to OCR <input id="max-pages" type="number" min="1" value="3" /></label>
-      <button id="run" disabled>OCR</button>
-      <div id="status" aria-live="polite"></div>
-      <progress id="progress" max="1" value="0" hidden></progress>
-
-      <section id="audiobook">
-        <h2>Audiobook</h2>
-        <label>Audio (optional) <input id="audio-file" type="file" accept="audio/*" /></label>
-        <label
-          >Subtitles (optional) <input id="sub-file" type="file" accept=".srt,.vtt,text/*"
-        /></label>
-        <audio id="audio" controls></audio>
-      </section>
+      <label class="check"
+        ><input id="force-ocr" type="checkbox" /> Force OCR (the text layer of the PDF is
+        wrong)</label
+      >
+      <label
+        >Dictionary
+        <select id="dict">
+          <option value="">Ask each time</option>
+        </select>
+      </label>
+      <label class="check"
+        ><input id="pause-lookup" type="checkbox" checked /> Pause on lookup</label
+      >
+      <div class="row">
+        <button id="clear-cache">Clear the page cache</button>
+      </div>
 
       <ol id="cues"></ol>
     </aside>

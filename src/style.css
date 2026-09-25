@@ -31,7 +31,8 @@ body {
 #page-label {
   flex: 1;
   text-align: center;
-  font-size: 0.9rem;
+  font-size: 0.85rem;
+  white-space: nowrap;
 }
 
 #panel {
@@ -85,16 +86,65 @@ body.menu-open #panel {
   min-height: 1.2em;
 }
 
-#audiobook {
+#topbar button {
+  white-space: nowrap;
+  font-size: 0.85rem;
+  padding: 0.25rem 0.45rem;
+}
+
+#play {
+  min-width: 2.5rem;
+}
+
+.row {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 0.5rem;
+  font-size: 0.85rem;
+}
+
+#panel label.check,
+#follow label {
+  flex-direction: row;
+  align-items: center;
+  gap: 0.4rem;
+}
+
+#follow {
+  display: flex;
+  flex-direction: column;
+  gap: 0.3rem;
+  margin: 0;
+  padding: 0.4rem 0.6rem;
+  border: 1px solid #8884;
+  border-radius: 4px;
+  font-size: 0.85rem;
+}
+
+#follow legend {
+  padding: 0 0.2rem;
+}
+
+#make,
+#audio-row {
   display: flex;
   flex-direction: column;
   gap: 0.4rem;
   font-size: 0.85rem;
 }
 
-#audiobook h2 {
-  font-size: 0.95rem;
-  margin: 0;
+#make-status,
+#player-status,
+#pages-status,
+#status {
+  word-break: break-word;
+}
+
+#status a,
+#make-status a,
+#player-status a {
+  color: inherit;
 }
 
 #audio {
