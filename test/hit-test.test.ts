@@ -50,12 +50,40 @@ describe('tokenAt', () => {
   });
 });
 
+/** Tokens of one line of words, with a word id per word. Spaces are not tokens. */
+function wordTokens(words: string[], page = 0, line = 0): OcrToken[] {
+  const tokens: OcrToken[] = [];
+  let col = 0;
+  words.forEach((w, wi) => {
+    for (const ch of w) {
+      tokens.push({
+        text: ch,
+        page,
+        line,
+        word: wi,
+        bbox: { x0: col * 10, y0: 0, x1: col * 10 + 10, y1: 20 },
+      });
+      col++;
+    }
+    col++;
+  });
+  return tokens;
+}
+
 describe('scanText', () => {
   it('reads to the end of the line, up to the limit', () => {
     const tokens = tokensOf(['吾輩は猫である', '名前はまだ無い']);
     expect(scanText(tokens, 3)).toBe('猫である');
     expect(scanText(tokens, 0, 3)).toBe('吾輩は');
     expect(scanText(tokens, 99)).toBe('');
+  });
+
+  it('puts a space between words, and the spaces do not count', () => {
+    const tokens = wordTokens(['who', 'answered', 'with']);
+    expect(scanText(tokens, 0)).toBe('who answered with');
+    expect(scanText(tokens, 1)).toBe('ho answered with');
+    expect(scanText(tokens, 0, 10)).toBe('who answere');
+    expect(scanText(wordTokens(['吾輩', 'は', 'cat']), 0)).toBe('吾輩は cat');
   });
 });
 
@@ -71,6 +99,11 @@ describe('lookupText', () => {
     expect(lookupText(tokens, 3)).toBe('猫である名前はまだ無い');
   });
 
+  it('joins a short line and the next line with a space', () => {
+    const tokens = [...wordTokens(['the', 'end'], 0, 0), ...wordTokens(['of', 'it'], 0, 1)];
+    expect(lookupText(tokens, 3)).toBe('end of it');
+  });
+
   it('does not cross to the next page', () => {
     const tokens = [...tokensOf(['abcdef'], 0), ...tokensOf(['ghijkl'], 1)];
     expect(lookupText(tokens, 4)).toBe('ef');
@@ -80,7 +113,8 @@ describe('lookupText', () => {
   it('stops at the lookup length', () => {
     const tokens = tokensOf(['a'.repeat(60), 'b'.repeat(60)]);
     expect(lookupText(tokens, 0)).toBe('a'.repeat(LOOKUP_LENGTH));
-    expect(lookupText(tokens, 58)).toBe('aa' + 'b'.repeat(LOOKUP_LENGTH - 2));
+    // A line break is a word break: a space goes between the two lines.
+    expect(lookupText(tokens, 58)).toBe('aa ' + 'b'.repeat(LOOKUP_LENGTH - 2));
   });
 
   it('never returns more than the lookup length, and always starts with the tapped character', () => {
@@ -90,7 +124,7 @@ describe('lookupText', () => {
         const tokens = tokensOf(lines);
         const start = pick % tokens.length;
         const text = lookupText(tokens, start);
-        expect([...text].length).toBeLessThanOrEqual(LOOKUP_LENGTH);
+        expect([...text.replace(/ /g, '')].length).toBeLessThanOrEqual(LOOKUP_LENGTH);
         expect(text.startsWith(tokens[start]!.text)).toBe(true);
       }),
     );

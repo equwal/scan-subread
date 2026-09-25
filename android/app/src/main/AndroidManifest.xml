@@ -24,6 +24,7 @@
 
         </activity>
 
+        <!-- Gives the book text to SubRead, and the finished .srt to the share sheet. -->
         <provider
             android:name="androidx.core.content.FileProvider"
             android:authorities="${applicationId}.fileprovider"
@@ -34,6 +35,21 @@
                 android:resource="@xml/file_paths"></meta-data>
         </provider>
     </application>
+
+    <!-- Android 11 and later hide other apps without this. -->
+    <queries>
+        <package android:name="space.subread.app" />
+        <package android:name="space.subread.overlay" />
+        <package android:name="space.subread.overlay.debug" />
+        <package android:name="space.subread.dictionary" />
+        <!-- The player provider of SubRead Overlay: the release build and the debug build. -->
+        <provider android:authorities="space.subread.overlay.player;space.subread.overlay.debug.player" />
+        <!-- The dictionary apps: each app in the text selection menu. -->
+        <intent>
+            <action android:name="android.intent.action.PROCESS_TEXT" />
+            <data android:mimeType="text/plain" />
+        </intent>
+    </queries>
 
     <!-- Permissions -->
 

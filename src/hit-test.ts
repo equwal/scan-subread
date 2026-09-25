@@ -5,6 +5,7 @@
 // 3. `lookupText` is the text that goes to the dictionary app.
 
 import type { OcrToken } from './align';
+import { joinWords } from './book-text';
 
 /** Longest scan string, in characters. */
 export const SCAN_LENGTH = 16;
@@ -57,16 +58,31 @@ export function tokenAt(
   return best;
 }
 
-/** Text of token `start` and the following tokens on its line, up to `max` characters. */
+/**
+ * Text of token `start` and the following tokens on its line, up to `max`
+ * characters. Spaces are not tokens: a space goes between two words,
+ * except between two CJK words, and does not count toward `max`.
+ */
 export function scanText(tokens: readonly OcrToken[], start: number, max = SCAN_LENGTH): string {
   const first = tokens[start];
   if (!first) return '';
-  let text = '';
+  const words: string[] = [];
+  let word = '';
+  let wordId = first.word;
+  let length = 0;
   for (let i = start; i < tokens.length && tokens[i]!.line === first.line; i++) {
-    if (text.length + tokens[i]!.text.length > max) break;
-    text += tokens[i]!.text;
+    const t = tokens[i]!;
+    if (length + t.text.length > max) break;
+    if (t.word !== wordId) {
+      words.push(word);
+      word = '';
+      wordId = t.word;
+    }
+    word += t.text;
+    length += t.text.length;
   }
-  return text;
+  words.push(word);
+  return joinWords(words);
 }
 
 /** Index of the first token after the line of token `start`, or -1 at the end. */
@@ -85,10 +101,10 @@ function nextLine(tokens: readonly OcrToken[], start: number): number {
 export function lookupText(tokens: readonly OcrToken[], start: number): string {
   const first = tokens[start];
   if (!first) return '';
-  let text = scanText(tokens, start, LOOKUP_LENGTH);
-  if (text.length > LOOKUP_SHORT_LINE) return text;
+  const text = scanText(tokens, start, LOOKUP_LENGTH);
+  const length = [...text.replace(/ /g, '')].length;
+  if (length > LOOKUP_SHORT_LINE) return text;
   const next = nextLine(tokens, start);
   if (next < 0 || tokens[next]!.page !== first.page) return text;
-  text += scanText(tokens, next, LOOKUP_LENGTH - text.length);
-  return text;
+  return joinWords([text, scanText(tokens, next, LOOKUP_LENGTH - length)]);
 }
