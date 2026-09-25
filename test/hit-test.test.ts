@@ -1,8 +1,7 @@
+import fc from 'fast-check';
 import { describe, expect, it } from 'vitest';
 import type { OcrToken } from '../src/align';
-import { lookup, memoryFinder, scanText, tokenAt } from '../src/lookup';
-import { openDictionaryZip, type DictTerm } from '../src/yomitan';
-import { buildTestDictionaryZip } from '../fixtures/test-dict';
+import { LOOKUP_LENGTH, lookupText, scanText, tokenAt } from '../src/hit-test';
 
 /** Tokens for one page: `lines` laid out left to right, 10 px per character. */
 function tokensOf(lines: string[], page = 0): OcrToken[] {
@@ -60,46 +59,40 @@ describe('scanText', () => {
   });
 });
 
-describe('lookup', () => {
-  const dict = openDictionaryZip(buildTestDictionaryZip());
-  const terms: DictTerm[] = dict.termBanks.flatMap((n) => dict.readTermBank(n));
-  const find = memoryFinder(terms);
-
-  it('returns the longest match first', async () => {
-    const results = await lookup('吾輩は猫である', find);
-    expect(results[0]).toMatchObject({ surface: '吾輩', rules: [] });
-    expect(results[0]!.term.glossary).toEqual(['I, me (archaic, pompous)']);
+describe('lookupText', () => {
+  it('reads to the end of the line', () => {
+    const tokens = tokensOf(['吾輩は猫である', '名前はまだ無い']);
+    expect(lookupText(tokens, 2)).toBe('は猫である');
   });
 
-  it('matches a deinflected verb', async () => {
-    const results = await lookup('泣いていた事', find);
-    expect(results[0]).toMatchObject({
-      surface: '泣いていた',
-      rules: ['past', 'progressive', 'te'],
-    });
-    expect(results[0]!.term.expression).toBe('泣く');
+  it('adds the next line when the line ends within four characters', () => {
+    const tokens = tokensOf(['吾輩は猫である', '名前はまだ無い']);
+    expect(lookupText(tokens, 4)).toBe('である名前はまだ無い');
+    expect(lookupText(tokens, 3)).toBe('猫である名前はまだ無い');
   });
 
-  it('matches a reading', async () => {
-    const results = await lookup('ねこ', find);
-    expect(results.map((r) => r.term.expression)).toEqual(['猫']);
+  it('does not cross to the next page', () => {
+    const tokens = [...tokensOf(['abcdef'], 0), ...tokensOf(['ghijkl'], 1)];
+    expect(lookupText(tokens, 4)).toBe('ef');
+    expect(lookupText(tokens, 10)).toBe('kl');
   });
 
-  it('checks the part of speech of a deinflected match', async () => {
-    // 猫 has no verb rules, so 猫る is not accepted through the "negative" rule.
-    const catVerb: DictTerm = {
-      expression: '猫る',
-      reading: '',
-      rules: 'v5',
-      score: 0,
-      glossary: [],
-    };
-    const results = await lookup('猫ない', memoryFinder([...terms, catVerb]));
-    expect(results.map((r) => r.term.expression)).toEqual(['猫']);
+  it('stops at the lookup length', () => {
+    const tokens = tokensOf(['a'.repeat(60), 'b'.repeat(60)]);
+    expect(lookupText(tokens, 0)).toBe('a'.repeat(LOOKUP_LENGTH));
+    expect(lookupText(tokens, 58)).toBe('aa' + 'b'.repeat(LOOKUP_LENGTH - 2));
   });
 
-  it('returns nothing when no prefix matches', async () => {
-    expect(await lookup('xyz', find)).toEqual([]);
-    expect(await lookup('', find)).toEqual([]);
+  it('never returns more than the lookup length, and always starts with the tapped character', () => {
+    const line = fc.stringMatching(/^[\p{L}]{1,50}$/u);
+    fc.assert(
+      fc.property(fc.array(line, { minLength: 1, maxLength: 4 }), fc.nat(), (lines, pick) => {
+        const tokens = tokensOf(lines);
+        const start = pick % tokens.length;
+        const text = lookupText(tokens, start);
+        expect([...text].length).toBeLessThanOrEqual(LOOKUP_LENGTH);
+        expect(text.startsWith(tokens[start]!.text)).toBe(true);
+      }),
+    );
   });
 });

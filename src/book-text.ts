@@ -1,8 +1,7 @@
-// The OCR text as a plain-text book. Pure: no DOM.
+// The page text as a plain-text book. Pure: no DOM.
 //
-// Both aligners (the subread.space server and the in-app engine) read the
-// book as text lines. This module turns the OCR tokens into that text and
-// back into the paragraph list the in-app engine takes.
+// SubRead reads the book as text lines when it makes the subtitles. This
+// module turns the page tokens (OCR or text layer) into that text.
 
 import type { OcrToken } from './align';
 
@@ -73,19 +72,6 @@ export function bookText(tokens: readonly OcrToken[]): string {
   }
   endPage();
   return pages.map((p) => p.join('\n')).join('\n\n') + (pages.length > 0 ? '\n' : '');
-}
-
-/** The non-blank lines of a book text, trimmed. This is what the aligner takes. */
-export function paragraphs(text: string): string[] {
-  return text
-    .split('\n')
-    .map((l) => l.trim())
-    .filter((l) => l.length > 0);
-}
-
-/** The book as a file for the upload. The server pairs it with the audio by suffix. */
-export function bookFile(tokens: readonly OcrToken[]): File {
-  return new File([bookText(tokens)], 'book.txt', { type: 'text/plain' });
 }
 
 /** The Whisper language code for a tesseract language ("jpn", "jpn_vert", "jpn+eng", "eng"). */

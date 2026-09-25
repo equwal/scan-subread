@@ -16,7 +16,7 @@
 
     <aside id="panel">
       <h1>Scan Subread</h1>
-      <p class="hint">Load a scanned PDF, run OCR, then tap a word on the page to look it up.</p>
+      <p class="hint">Load a scanned PDF, run OCR, then tap a word on the page.</p>
 
       <label>PDF (scanned) <input id="pdf-file" type="file" accept="application/pdf" /></label>
       <label
@@ -33,69 +33,12 @@
       <div id="status" aria-live="polite"></div>
       <progress id="progress" max="1" value="0" hidden></progress>
 
-      <label
-        >Dictionaries (Yomitan zip)
-        <input id="dict-file" type="file" accept=".zip,application/zip" multiple />
-      </label>
-      <ul id="dicts"></ul>
-
-      <section id="local-audio">
-        <h2>Local audio (android.db)</h2>
-        <div id="la-status" class="hint">Local audio: checking...</div>
-        <div class="row">
-          <button id="la-import" disabled>Import</button>
-          <button id="la-remove" disabled>Remove</button>
-        </div>
-        <progress id="la-progress" max="1" value="0" hidden></progress>
-        <p class="hint">
-          Or copy the file by hand to
-          <code>Android/data/com.equwal.scansubread/files/android.db</code>.
-        </p>
-      </section>
-
       <section id="audiobook">
         <h2>Audiobook</h2>
         <label>Audio (optional) <input id="audio-file" type="file" accept="audio/*" /></label>
         <label
           >Subtitles (optional) <input id="sub-file" type="file" accept=".srt,.vtt,text/*"
         /></label>
-        <label
-          >Narration language
-          <select id="ab-lang">
-            <option value="ja">Japanese (ja)</option>
-            <option value="en">English (en)</option>
-          </select>
-        </label>
-        <div class="row">
-          <button id="ab-cloud" disabled>Make subtitles on subread.space</button>
-          <button id="ab-local" disabled>Make subtitles in this app</button>
-          <button id="ab-stop" hidden>Stop</button>
-        </div>
-        <div id="ab-status" class="hint">Load a PDF, run OCR and pick an audio file.</div>
-        <progress id="ab-progress" max="1" value="0" hidden></progress>
-        <p class="hint">
-          The server is fast and takes one credit per book. In this app the speech model runs in
-          WebAssembly: about real time or slower on a phone, and the screen must stay on.
-        </p>
-        <div id="ab-account" class="hint">Account: not checked yet.</div>
-        <label>Sign in (email) <input id="ab-email" type="email" autocomplete="email" /></label>
-        <div class="row">
-          <button id="ab-send">Send link</button>
-        </div>
-        <label>Paste the sign-in link or token <input id="ab-token" type="text" /></label>
-        <div class="row">
-          <button id="ab-verify">Verify</button>
-        </div>
-        <details>
-          <summary>Advanced</summary>
-          <label
-            >Server URL <input id="ab-server" type="url" placeholder="https://subread.space"
-          /></label>
-          <label
-            >Engine assets URL
-            <input id="ab-assets" type="url" placeholder="https://subread.space/vendor/"
-          /></label>
-        </details>
         <audio id="audio" controls></audio>
       </section>
 
@@ -109,8 +52,6 @@
         </div>
       </div>
     </main>
-
-    <div id="popup" hidden></div>
 
     <script type="module" src="/src/main.ts"></script>
   </body>

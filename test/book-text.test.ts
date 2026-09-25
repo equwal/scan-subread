@@ -1,9 +1,17 @@
 import fc from 'fast-check';
 import { describe, expect, it } from 'vitest';
 import type { OcrToken } from '../src/align';
-import { bookText, joinWords, paragraphs, whisperCode } from '../src/book-text';
+import { bookText, joinWords, whisperCode } from '../src/book-text';
 
 const box = { x0: 0, y0: 0, x1: 1, y1: 1 };
+
+/** The non-blank lines of a book text, trimmed. */
+function paragraphs(text: string): string[] {
+  return text
+    .split('\n')
+    .map((l) => l.trim())
+    .filter((l) => l.length > 0);
+}
 
 /** Tokens for one page: `lines` is a list of lines, each a list of words. */
 function pageTokens(page: number, lines: readonly (readonly string[])[]): OcrToken[] {
@@ -77,12 +85,6 @@ describe('bookText', () => {
         expect(paragraphs(bookText(tokens))).toEqual(expected);
       }),
     );
-  });
-});
-
-describe('paragraphs', () => {
-  it('keeps non-blank lines, trimmed', () => {
-    expect(paragraphs('a\n\n  b \n\n\nc\n')).toEqual(['a', 'b', 'c']);
   });
 });
 
