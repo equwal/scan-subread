@@ -70,7 +70,8 @@ describe('waitUntil', () => {
           expect(positionAt(playing, now)).toBeGreaterThanOrEqual(target);
         } else {
           expect(wait).toBeGreaterThan(0);
-          expect(positionAt(playing, now + wait)).toBeGreaterThanOrEqual(target);
+          // The wait is whole milliseconds; the float product can fall a hair short.
+          expect(positionAt(playing, now + wait)).toBeGreaterThanOrEqual(target - 1e-6);
         }
       }),
     );

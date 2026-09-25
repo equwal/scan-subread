@@ -26,6 +26,7 @@
   },
   "devDependencies": {
     "@capacitor/cli": "^8.5.2",
+    "@pdf-lib/fontkit": "^1.1.1",
     "@types/node": "^26.6.2",
     "fast-check": "^4.10.2",
     "pdf-lib": "^1.17.1",

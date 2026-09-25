@@ -1,24 +1,36 @@
 // Build the synthetic fixtures in fixtures/:
-//   <name>.png  scanned-like page image (SVG text rendered with sharp)
-//   <name>.pdf  one-page image-only PDF, as a scanner would produce
-//   <name>.srt  one cue per text line
-//   silence.wav silent audio long enough for all cues
+//   <name>.png, <name>-<n>.png  scanned-like page images (SVG text rendered with sharp)
+//   <name>.pdf        image-only PDF, one page per image, as a scanner would produce
+//   <name>-text.pdf   the same text as a text layer (pdf-lib, Helvetica or a TrueType file)
+//   <name>.srt        the subtitle cues
+//   silence.wav       silent audio long enough for all cues
 // Run: npm run fixtures
 
-import { mkdir, writeFile } from 'node:fs/promises';
+import fontkit from '@pdf-lib/fontkit';
+import { access, mkdir, readFile, writeFile } from 'node:fs/promises';
 import path from 'node:path';
-import { PDFDocument } from 'pdf-lib';
+import { PDFDocument, StandardFonts, type PDFFont } from 'pdf-lib';
 import sharp from 'sharp';
 import { CUE_SECONDS, FIXTURES, PAGE, toSrt, type Fixture } from '../fixtures/sample-text';
 
 const OUT = path.resolve('fixtures');
 
+/** Text-layer page geometry in points (A4). */
+const TEXT_PAGE = {
+  width: 595,
+  height: 842,
+  marginLeft: 60,
+  firstBaseline: 100,
+  lineHeight: 30,
+  fontSize: 14,
+};
+
 function escapeXml(s: string): string {
   return s.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
 }
 
-function pageSvg(fixture: Fixture): string {
-  const text = fixture.lines
+function pageSvg(fixture: Fixture, lines: string[]): string {
+  const text = lines
     .map(
       (line, i) =>
         `<text x="${PAGE.marginLeft}" y="${PAGE.firstBaseline + i * PAGE.lineHeight}">${escapeXml(line)}</text>`,
@@ -32,9 +44,9 @@ ${text}
 </svg>`;
 }
 
-async function renderPng(fixture: Fixture): Promise<Buffer> {
+async function renderPng(fixture: Fixture, lines: string[]): Promise<Buffer> {
   // A light blur and a small rotation make the page look scanned.
-  return sharp(Buffer.from(pageSvg(fixture)))
+  return sharp(Buffer.from(pageSvg(fixture, lines)))
     .rotate(0.4, { background: '#f4f1ea' })
     .resize(PAGE.width, PAGE.height, { fit: 'cover' })
     .blur(0.6)
@@ -42,12 +54,43 @@ async function renderPng(fixture: Fixture): Promise<Buffer> {
     .toBuffer();
 }
 
-async function toPdf(png: Buffer): Promise<Uint8Array> {
+async function toPdf(pngs: Buffer[]): Promise<Uint8Array> {
   const doc = await PDFDocument.create();
-  const image = await doc.embedPng(png);
-  // 150 dpi image on a 72 dpi page.
-  const page = doc.addPage([PAGE.width * 0.48, PAGE.height * 0.48]);
-  page.drawImage(image, { x: 0, y: 0, width: page.getWidth(), height: page.getHeight() });
+  for (const png of pngs) {
+    const image = await doc.embedPng(png);
+    // 150 dpi image on a 72 dpi page.
+    const page = doc.addPage([PAGE.width * 0.48, PAGE.height * 0.48]);
+    page.drawImage(image, { x: 0, y: 0, width: page.getWidth(), height: page.getHeight() });
+  }
+  return doc.save();
+}
+
+/** The same text as a text layer. Returns null when the TrueType file is not on this machine. */
+async function toTextPdf(fixture: Fixture): Promise<Uint8Array | null> {
+  const doc = await PDFDocument.create();
+  let font: PDFFont;
+  if (fixture.ttf) {
+    try {
+      await access(fixture.ttf);
+    } catch {
+      return null;
+    }
+    doc.registerFontkit(fontkit);
+    font = await doc.embedFont(await readFile(fixture.ttf), { subset: true });
+  } else {
+    font = await doc.embedFont(StandardFonts.Helvetica);
+  }
+  for (const lines of fixture.pages) {
+    const page = doc.addPage([TEXT_PAGE.width, TEXT_PAGE.height]);
+    lines.forEach((line, i) => {
+      page.drawText(line, {
+        x: TEXT_PAGE.marginLeft,
+        y: TEXT_PAGE.height - TEXT_PAGE.firstBaseline - i * TEXT_PAGE.lineHeight,
+        size: TEXT_PAGE.fontSize,
+        font,
+      });
+    });
+  }
   return doc.save();
 }
 
@@ -73,16 +116,30 @@ function silentWav(seconds: number): Buffer {
   return buf;
 }
 
+/** The image file of page `p` of a fixture: `<name>.png` for one page, `<name>-<p+1>.png` for more. */
+export function pngName(fixture: Fixture, p: number): string {
+  return fixture.pages.length === 1 ? `${fixture.name}.png` : `${fixture.name}-${p + 1}.png`;
+}
+
 async function main(): Promise<void> {
   await mkdir(OUT, { recursive: true });
   let maxSeconds = 0;
   for (const fixture of FIXTURES) {
-    const png = await renderPng(fixture);
-    await writeFile(path.join(OUT, `${fixture.name}.png`), png);
-    await writeFile(path.join(OUT, `${fixture.name}.pdf`), await toPdf(png));
+    const pngs: Buffer[] = [];
+    for (const [p, lines] of fixture.pages.entries()) {
+      const png = await renderPng(fixture, lines);
+      pngs.push(png);
+      await writeFile(path.join(OUT, pngName(fixture, p)), png);
+    }
+    await writeFile(path.join(OUT, `${fixture.name}.pdf`), await toPdf(pngs));
     await writeFile(path.join(OUT, `${fixture.name}.srt`), toSrt(fixture));
-    maxSeconds = Math.max(maxSeconds, fixture.lines.length * CUE_SECONDS);
-    console.log(`wrote ${fixture.name}.png/.pdf/.srt (${fixture.lines.length} lines)`);
+    const text = await toTextPdf(fixture);
+    if (text) await writeFile(path.join(OUT, `${fixture.name}-text.pdf`), text);
+    else console.log(`skipped ${fixture.name}-text.pdf: ${fixture.ttf} is not on this machine`);
+    maxSeconds = Math.max(maxSeconds, fixture.cues.length * CUE_SECONDS);
+    console.log(
+      `wrote ${fixture.name}: ${fixture.pages.length} page(s), ${fixture.cues.length} cues${text ? ', text layer' : ''}`,
+    );
   }
   await writeFile(path.join(OUT, 'silence.wav'), silentWav(maxSeconds + 1));
   console.log(`wrote silence.wav (${maxSeconds + 1} s)`);

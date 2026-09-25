@@ -4,7 +4,7 @@ import type Tesseract from 'tesseract.js';
 import type { OcrToken } from './align';
 
 /** Line ids are unique across pages: page * LINES_PER_PAGE + line. */
-const LINES_PER_PAGE = 100000;
+export const LINES_PER_PAGE = 100000;
 
 /**
  * One token per recognized symbol (character). Symbol level works for
