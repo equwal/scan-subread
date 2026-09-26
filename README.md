@@ -287,9 +287,17 @@ in a browser bundle.
 
 ## Scope limits
 
-- The alignment runs over the whole book each time a page is read. It
-  takes about 5 s for 200k characters at 10% OCR noise, and well under
-  1 s for a chapter.
+- The alignment finds each page in the subtitles on its own: runs of 8
+  characters that occur only once in the subtitles show where the page
+  is, and a character diff compares the page with that part only. So a
+  cue matches only a page that is read, and subtitles of another text
+  match nothing. A page is aligned once, when it is read. That takes a
+  few milliseconds; all the pages of a book of 300 000 characters take
+  about 1 s (Node on a desktop).
+- A page with fewer than three such runs gets no cues, for example a
+  page with only a few words. A subtitle file of 64 characters or less
+  is too short for the runs: it is compared with each whole page, and
+  text that is not in it can match by chance.
 - A vertical font in a text layer (`dir: 'ttb'` in pdf.js) lays the
   characters down the page. This path has unit tests with mocked items,
   but no fixture PDF: pdf-lib does not write vertical text.
