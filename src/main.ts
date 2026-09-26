@@ -1,5 +1,6 @@
 // UI wiring. The logic lives in the pure modules: align.ts, follower.ts,
-// hit-test.ts, line-boxes.ts, text-layer.ts, player-state.ts, play-clock.ts.
+// hit-test.ts, line-boxes.ts, read-order.ts, text-layer.ts, player-state.ts,
+// play-clock.ts.
 
 import { createAligner, type Aligner, type OcrToken, type TokenSpan } from './align';
 import { bookText } from './book-text';
@@ -9,6 +10,7 @@ import { lookupText, tokenAt } from './hit-test';
 import { lineBoxes } from './line-boxes';
 import { createOcr, type Ocr } from './ocr';
 import { loadPdf, type PdfDoc } from './pdf';
+import { nextPage } from './read-order';
 import { isAndroid, SubRead } from './subread';
 import { cueIndexAt, parseSubtitles, type Cue } from './subtitles';
 import {
@@ -209,13 +211,6 @@ ui.pdfFile.addEventListener('change', async () => {
   }
 });
 
-/** The next page to read: the current page, its neighbors, then the rest in order. */
-function nextPage(pending: Set<number>): number {
-  const current = state.currentPage;
-  for (const p of [current, current + 1, current - 1]) if (pending.has(p)) return p;
-  return Math.min(...pending);
-}
-
 /** The tokens of one page: from the cache, else the text layer, else OCR. */
 async function readPage(
   pdf: PdfDoc,
@@ -247,9 +242,9 @@ async function readPage(
 }
 
 /**
- * Reads every page of the book: the current page first, then its
- * neighbors, then the rest. The cues are aligned again as pages finish,
- * so the follow starts before the whole book is read.
+ * Reads every page of the book: the current page first, then the pages
+ * after it, then the pages before it. The cues are aligned again as pages
+ * finish, so the follow starts before the whole book is read.
  */
 async function readBook(): Promise<void> {
   const { pdf, file } = state;
@@ -274,7 +269,7 @@ async function readBook(): Promise<void> {
   const counts = { text: 0, ocr: 0 };
   try {
     while (pending.size > 0) {
-      const page = nextPage(pending);
+      const page = nextPage(pending, state.currentPage);
       pending.delete(page);
       ui.progress.hidden = false;
       ui.progress.value = 0;

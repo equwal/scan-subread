@@ -25,8 +25,8 @@ open.
 1. Open the menu (the "Menu" button on a phone; the left panel on a
    desktop).
 2. Load a PDF. The app reads the pages at once: the current page first,
-   then its neighbors, then the rest. "Pages" in the menu shows how far
-   it is.
+   then the pages after it to the end, then the pages before it. "Pages"
+   in the menu shows how far it is.
 3. Load the subtitles, or on Android press "Make subtitles with SubRead":
    pick the audiobook, and SubRead makes the `.srt` from the audio and
    the text of the pages read so far. The result loads at once, is kept
@@ -278,6 +278,7 @@ in a browser bundle.
   lookup text.
 - `src/line-boxes.ts`: pure boxes that mark a cue, one for each text
   line of the page.
+- `src/read-order.ts`: pure order in which the pages are read.
 - `src/book-text.ts`: pure tokens to the book text for SubRead.
 - `src/subread.ts`: the typed side of the plugin, with the web fallback.
 - `src/token-cache.ts`: IndexedDB store for the page tokens and the
