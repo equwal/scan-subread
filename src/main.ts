@@ -477,9 +477,8 @@ function renderCueList(): void {
 }
 
 function markCueInList(i: number): void {
-  const items = ui.cues.children;
-  items[state.activeCue]?.classList.remove('active');
-  items[i]?.classList.add('active');
+  ui.cues.querySelector('.active')?.classList.remove('active');
+  ui.cues.children[i]?.classList.add('active');
   scrollCueList(i);
 }
 

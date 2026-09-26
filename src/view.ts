@@ -104,8 +104,12 @@ export function createPageView(
     scrollTo(scrollTarget(extent, view, v.scrollHeight - v.clientHeight), smooth);
   }
 
-  /** Renders the page. `turn`: a new page, so scroll to its mark or to its top. */
-  async function render(turn: boolean): Promise<void> {
+  /**
+   * Renders the page to show. When it is another page than the page on
+   * the canvas, the viewer scrolls to its mark, else to its top. Else the
+   * mark stays in view.
+   */
+  async function render(): Promise<void> {
     const doc = pdf;
     if (!doc || index < 0) return;
     const my = ++seq;
@@ -115,6 +119,7 @@ export function createPageView(
     const width = Math.round(Math.min(MAX_RENDER, Math.max(300, cssWidth * dpr)));
     const c = await doc.renderPage(at, width);
     if (my !== seq) return; // A newer render replaced this one.
+    const turn = doc !== shown.pdf || at !== shown.index;
     // A new canvas can change the height of the content, and the browser
     // then moves the scroll position. That scroll does not come from the user.
     autoUntil = performance.now() + AUTO_SCROLL_MS;
@@ -155,7 +160,7 @@ export function createPageView(
   }
 
   // Render again when the width of the page changes, for example after a
-  // rotation. The canvas stretches at once; the new render makes it sharp.
+  // rotation. The canvas stretches at once. The new render makes it sharp.
   let resizeTimer: ReturnType<typeof setTimeout> | undefined;
   new ResizeObserver(() => {
     clearTimeout(resizeTimer);
@@ -163,17 +168,16 @@ export function createPageView(
       const dpr = window.devicePixelRatio || 1;
       const width = ui.page.clientWidth;
       if (width > 0 && (Math.abs(width - shown.cssWidth) >= 1 || dpr !== shown.dpr)) {
-        void render(false);
+        void render();
       }
     }, RESIZE_MS);
   }).observe(ui.viewer);
 
   return {
     show(doc, i) {
-      const turn = doc !== shown.pdf || i !== shown.index;
       pdf = doc;
       index = i;
-      return render(turn);
+      return render();
     },
     mark() {
       keepInView(draw(), true);
