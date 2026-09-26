@@ -1,13 +1,21 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import {
   JUMP_MS,
+  LocalAudioClock,
   OverlayClock,
+  PlayerError,
   POLL_ERROR_MS,
   POLL_MS,
   TICK_MS,
   type ClockState,
   type PlayerBridge,
 } from '../src/clock-source';
+
+/** Expects `promise` to reject with a PlayerError for `reason`. */
+async function expectPlayerError(promise: Promise<void>, reason: string): Promise<void> {
+  await expect(promise).rejects.toMatchObject({ name: 'PlayerError', reason, message: reason });
+  await expect(promise).rejects.toBeInstanceOf(PlayerError);
+}
 
 /** A fake SubRead Overlay: answers the line set in `line`, counts the calls. */
 function fakeBridge(line: string) {
@@ -131,5 +139,76 @@ describe('OverlayClock', () => {
     await clock.pause();
     expect(states.at(-1)!.playing).toBe(false);
     clock.stop();
+  });
+
+  it('rejects play, pause and seek when the player answers an error, and keeps the place', async () => {
+    const bridge = fakeBridge('playing=1;position=5000;speed=1;package=p');
+    const states: ClockState[] = [];
+    const clock = new OverlayClock(bridge, now);
+    clock.start((s) => states.push(s));
+    await vi.advanceTimersByTimeAsync(0);
+    bridge.line = 'error=no_player';
+    await expectPlayerError(clock.seek(17000), 'no_player');
+    expect(bridge.calls.at(-1)).toBe('seek 17000');
+    expect(states.at(-1)).toEqual({
+      positionMs: 5000,
+      playing: false,
+      seeked: false,
+      error: 'no_player',
+    });
+    await expectPlayerError(clock.play(), 'no_player');
+    expect(states.at(-1)!.playing).toBe(false);
+    await expectPlayerError(clock.pause(), 'no_player');
+    bridge.line = 'error=no_notification_access';
+    await expectPlayerError(clock.play(), 'no_notification_access');
+    clock.stop();
+  });
+
+  it('rejects with no_overlay when the bridge fails', async () => {
+    const bridge = fakeBridge('playing=0;position=1000;speed=1;package=p');
+    bridge.play = () => Promise.reject(new Error('no plugin'));
+    const states: ClockState[] = [];
+    const clock = new OverlayClock(bridge, now);
+    clock.start((s) => states.push(s));
+    await vi.advanceTimersByTimeAsync(0);
+    await expectPlayerError(clock.play(), 'no_overlay');
+    expect(states.at(-1)!.error).toBe('no_overlay');
+    clock.stop();
+  });
+});
+
+describe('LocalAudioClock', () => {
+  /** A fake audio element. Like a browser, it cannot play without a source. */
+  function fakeAudio() {
+    const audio = {
+      src: '',
+      currentTime: 0,
+      paused: true,
+      play: () =>
+        audio.src
+          ? Promise.resolve()
+          : Promise.reject(new DOMException('No supported sources.', 'NotSupportedError')),
+      pause: () => undefined,
+      addEventListener: () => undefined,
+      removeEventListener: () => undefined,
+    };
+    return audio;
+  }
+
+  it('rejects play and seek with no_player when no audio is loaded', async () => {
+    const audio = fakeAudio();
+    const clock = new LocalAudioClock(audio as unknown as HTMLAudioElement);
+    await expectPlayerError(clock.play(), 'no_player');
+    await expectPlayerError(clock.seek(17000), 'no_player');
+    expect(audio.currentTime).toBe(0);
+  });
+
+  it('plays and seeks when audio is loaded', async () => {
+    const audio = fakeAudio();
+    audio.src = 'blob:audio';
+    const clock = new LocalAudioClock(audio as unknown as HTMLAudioElement);
+    await clock.play();
+    await clock.seek(17000);
+    expect(audio.currentTime).toBe(17);
   });
 });
