@@ -1,7 +1,7 @@
 // UI wiring. The logic lives in the pure modules: align.ts, follower.ts,
 // hit-test.ts, text-layer.ts, player-state.ts, play-clock.ts.
 
-import { alignCuesToTokens, type OcrToken, type TokenSpan } from './align';
+import { createAligner, type Aligner, type OcrToken, type TokenSpan } from './align';
 import { bookText } from './book-text';
 import { LocalAudioClock, OverlayClock, type ClockSource, type ClockState } from './clock-source';
 import { follow, type FollowMode } from './follower';
@@ -83,6 +83,8 @@ const state = {
   /** The tokens of the pages read so far, in page order. */
   tokens: [] as OcrToken[],
   cues: [] as Cue[],
+  /** The aligner of the loaded subtitles. It keeps the result of each page. */
+  aligner: null as Aligner | null,
   spans: [] as TokenSpan[],
   /** The page of each cue, or null for an unmatched cue. */
   cuePages: [] as (number | null)[],
@@ -276,7 +278,9 @@ async function readBook(): Promise<void> {
       if (seq !== state.readSeq) return; // Another book or another setting took over.
       counts[entry.source]++;
       state.pages[page] = entry;
-      state.tokens = state.pages.flatMap((p) => p?.tokens ?? []);
+      // Put the tokens of the page at their place in page order.
+      const at = state.pages.slice(0, page).reduce((n, p) => n + (p?.tokens.length ?? 0), 0);
+      state.tokens.splice(at, 0, ...entry.tokens);
       setStatus(`Page ${page + 1}: ${entry.source === 'text' ? 'text layer' : 'OCR'}.`);
       ui.pagesStatus.textContent =
         `Pages: ${counts.text + counts.ocr}/${pdf.numPages} read ` +
@@ -308,6 +312,7 @@ ui.clearCache.addEventListener('click', async () => {
 /** Load subtitles from a file or from SubRead. `source` names where they came from. */
 function loadSubtitles(text: string, source: string): void {
   state.cues = parseSubtitles(text);
+  state.aligner = createAligner(state.cues.map((c) => c.text));
   state.srt = text;
   state.spans = [];
   state.cuePages = [];
@@ -394,11 +399,8 @@ function scheduleAlign(): void {
 /** Align the cues to the pages read so far. */
 function align(): void {
   state.alignTimer = null;
-  if (state.cues.length === 0 || state.tokens.length === 0) return;
-  state.spans = alignCuesToTokens(
-    state.cues.map((c) => c.text),
-    state.tokens,
-  );
+  if (!state.aligner || state.cues.length === 0 || state.tokens.length === 0) return;
+  state.spans = state.aligner.spans(state.pages.map((p) => p?.tokens));
   state.cuePages = state.spans.map((s) => (s.matched ? state.tokens[s.start]!.page : null));
   const matched = state.cuePages.filter((p) => p !== null).length;
   setStatus(`${matched}/${state.cues.length} cues matched to the page text.`);
