@@ -5,7 +5,8 @@
 import { createAligner, type Aligner, type OcrToken, type TokenSpan } from './align';
 import { bookText } from './book-text';
 import { LocalAudioClock, OverlayClock, type ClockSource, type ClockState } from './clock-source';
-import { follow, pageForCue, type FollowEvent, type FollowMode } from './follower';
+import { audioPage, cueParts, cueProgress, pageStartTime, type CueParts } from './cue-pages';
+import { follow, type FollowEvent, type FollowMode } from './follower';
 import { lookupText, tapTolerance, tokenAt } from './hit-test';
 import { lineBoxes } from './line-boxes';
 import {
@@ -102,8 +103,8 @@ const state = {
   /** The aligner of the loaded subtitles. It keeps the result of each page. */
   aligner: null as Aligner | null,
   spans: [] as TokenSpan[],
-  /** The page of each cue, or null for an unmatched cue. */
-  cuePages: [] as (number | null)[],
+  /** The parts of each cue on the pages. Empty for an unmatched cue. */
+  cueParts: [] as CueParts[],
   currentPage: -1,
   /** The cue of the last clock state, or -1. */
   activeCue: -1,
@@ -237,7 +238,7 @@ ui.pdfFile.addEventListener('change', async () => {
     state.pages = [];
     state.tokens = [];
     state.spans = [];
-    state.cuePages = [];
+    state.cueParts = [];
     state.activeCue = -1;
     state.markedCue = -1;
     state.held = false;
@@ -298,7 +299,7 @@ async function readBook(): Promise<void> {
   state.tokens = [];
   // The spans index the old tokens, so they go too.
   state.spans = [];
-  state.cuePages = [];
+  state.cueParts = [];
   state.markedCue = -1;
   const total = pdf.numPages;
   const pending = new Set(Array.from({ length: total }, (_, i) => i));
@@ -365,10 +366,10 @@ function loadSubtitles(text: string, source: string): void {
   state.aligner = createAligner(state.cues.map((c) => c.text));
   state.srt = text;
   state.spans = [];
-  state.cuePages = [];
+  state.cueParts = [];
   state.activeCue = -1;
   state.markedCue = -1;
-  ui.syncPage.disabled = state.cues.length === 0;
+  updateSyncPage();
   renderCueList();
   const matched = align();
   say(
@@ -458,13 +459,13 @@ function align(): number | null {
   state.alignTimer = null;
   if (!state.aligner || state.cues.length === 0 || state.tokens.length === 0) return null;
   state.spans = state.aligner.spans(state.pages.map((p) => p?.tokens));
-  state.cuePages = state.spans.map((s) => (s.matched ? state.tokens[s.start]!.page : null));
+  state.cueParts = cueParts(state.tokens, state.spans);
   renderCueList();
   view.mark();
   // The cue of now can have a new page. A new alignment is no seek, so a
   // page that the user turned to stays.
   runFollow('realign');
-  return state.cuePages.filter((p) => p !== null).length;
+  return state.cueParts.filter((parts) => parts.length > 0).length;
 }
 
 // --- Cue list ---
@@ -506,27 +507,37 @@ function showPlayerStatus(s: ClockState): void {
   }
   // Before a PDF is open, the start card tells what to do first.
   showPlayer(state.pdf ? playerMessage(s, isAndroid) : null);
+  updateSyncPage();
+}
+
+/** "Move the audio to this page" needs cues and a player with a position. */
+function updateSyncPage(): void {
+  const s = state.clock;
+  ui.syncPage.disabled = state.cues.length === 0 || !s || s.positionMs === null || s.error !== null;
 }
 
 /**
  * The follow for the last state of the clock: mark the cue of now, and
- * turn to its page unless the follow is held. In the silence between two
- * cues, the cue before stays the cue of now.
+ * turn to the page of the audio unless the follow is held. In the silence
+ * between two cues, the cue before stays the cue of now. In a cue on two
+ * pages, the page follows the time.
  */
 function runFollow(event: FollowEvent): void {
   const s = state.clock;
-  const cue = s?.positionMs == null ? -1 : lastCueAt(state.cues, s.positionMs / 1000);
+  const t = s?.positionMs == null ? null : s.positionMs / 1000;
+  const cue = t === null ? -1 : lastCueAt(state.cues, t);
   if (cue !== state.activeCue) {
     markCueInList(cue);
     state.activeCue = cue;
   }
   const mode = followMode();
-  const page = cue < 0 ? null : pageForCue(state.cuePages, cue);
+  const page =
+    t === null || cue < 0 ? null : audioPage(state.cueParts, cue, cueProgress(state.cues[cue]!, t));
   const out = follow({
     mode,
     currentPage: state.currentPage,
     cue,
-    matched: cue >= 0 && state.cuePages[cue] != null,
+    matched: (state.cueParts[cue]?.length ?? 0) > 0,
     page,
     held: state.held,
     event,
@@ -575,13 +586,15 @@ ui.play.addEventListener('click', () => {
 
 ui.followNow.addEventListener('click', () => runFollow('follow'));
 
+// The audio goes to where the text of the page starts, also inside a cue
+// that starts on the page before.
 ui.syncPage.addEventListener('click', () => {
-  const i = state.cuePages.indexOf(state.currentPage);
-  if (i < 0) {
+  const t = pageStartTime(state.cueParts, state.cues, state.currentPage);
+  if (t === null) {
     say('No cue of the subtitles is on this page.');
     return;
   }
-  seek(state.cues[i]!.start * 1000);
+  seek(t * 1000);
 });
 
 ui.audioFile.addEventListener('change', () => {

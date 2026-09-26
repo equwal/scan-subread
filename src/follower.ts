@@ -1,10 +1,9 @@
 // The reader follows the audio: which cue to mark, which page to show. Pure.
 //
-// The alignment gives each matched cue a page. At each step the follow
-// compares the page of the audio with the page shown, and turns the page
-// when they differ. A page turn by the user holds the follow: the page
-// stays until the audio reaches it, the audio jumps, or the user asks to
-// follow again.
+// At each step the follow compares the page of the audio (see audioPage
+// in cue-pages.ts) with the page shown, and turns the page when they
+// differ. A page turn by the user holds the follow: the page stays until
+// the audio reaches it, the audio jumps, or the user asks to follow again.
 
 export type FollowMode = 'highlight' | 'pages' | 'off';
 
@@ -41,22 +40,6 @@ export interface FollowOutput {
   turnToPage: number | null;
   /** True when the follow stays held. */
   held: boolean;
-}
-
-/** How many cues back an unmatched cue borrows the page of a matched one. */
-export const LOOKBACK = 5;
-
-/**
- * The page that stands for `cue`: its own page when the cue is matched,
- * else the page of the nearest matched cue before it, within LOOKBACK.
- * Null when there is none.
- */
-export function pageForCue(cuePages: readonly (number | null)[], cue: number): number | null {
-  for (let i = cue; i >= 0 && i >= cue - LOOKBACK; i--) {
-    const page = cuePages[i];
-    if (page !== null && page !== undefined) return page;
-  }
-  return null;
 }
 
 /**

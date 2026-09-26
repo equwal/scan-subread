@@ -1,15 +1,11 @@
 import fc from 'fast-check';
 import { describe, expect, it } from 'vitest';
-import {
-  follow,
-  LOOKBACK,
-  pageForCue,
-  type FollowEvent,
-  type FollowInput,
-  type FollowMode,
-} from '../src/follower';
+import { audioPage, type CueParts } from '../src/cue-pages';
+import { follow, type FollowEvent, type FollowInput, type FollowMode } from '../src/follower';
 
+/** The page of each cue. Null for an unmatched cue. */
 const pages: (number | null)[] = [0, 0, null, 1, 1, null, null, 2];
+const parts: CueParts[] = pages.map((p) => (p === null ? [] : [{ page: p, share: 1 }]));
 
 function input(over: Partial<FollowInput>): FollowInput {
   return {
@@ -24,32 +20,15 @@ function input(over: Partial<FollowInput>): FollowInput {
   };
 }
 
-/** The input of the follow for cue `cue` of `cuePages`. */
+/** The input of the follow at the start of cue `cue` of `pages`. */
 function at(cue: number, over: Partial<FollowInput> = {}): FollowInput {
   return input({
     cue,
     matched: pages[cue] !== null && pages[cue] !== undefined,
-    page: pageForCue(pages, cue),
+    page: audioPage(parts, cue, 0),
     ...over,
   });
 }
-
-describe('pageForCue', () => {
-  it('gives the page of a matched cue', () => {
-    expect(pageForCue(pages, 3)).toBe(1);
-  });
-
-  it('borrows the page of the nearest matched cue before an unmatched one', () => {
-    expect(pageForCue(pages, 2)).toBe(0);
-    expect(pageForCue(pages, 6)).toBe(1);
-  });
-
-  it('gives null when no matched cue is near enough', () => {
-    const far = [0, ...new Array<null>(LOOKBACK + 1).fill(null)];
-    expect(pageForCue(far, far.length - 1)).toBeNull();
-    expect(pageForCue(far, LOOKBACK)).toBe(0);
-  });
-});
 
 describe('follow', () => {
   it('marks a matched cue and stays on its page', () => {
