@@ -1,11 +1,15 @@
-// UI wiring. The logic lives in the pure modules: align.ts, follower.ts,
-// hit-test.ts, line-boxes.ts, read-order.ts, text-layer.ts, player-state.ts,
-// play-clock.ts.
+// UI wiring: the state of the book, the subtitles and the follow. The
+// logic lives in the pure modules (align.ts, cue-pages.ts, follower.ts,
+// hit-test.ts, line-boxes.ts, messages.ts, paging.ts, read-order.ts,
+// scroll.ts, text-layer.ts, player-state.ts, play-clock.ts). The UI parts
+// are in drawer.ts (the menu), nav.ts (page turns by the user), status.ts
+// (the strip) and view.ts (the page).
 
 import { createAligner, type Aligner, type OcrToken, type TokenSpan } from './align';
 import { bookText } from './book-text';
 import { LocalAudioClock, OverlayClock, type ClockSource, type ClockState } from './clock-source';
 import { audioPage, cueParts, cueProgress, pageStartTime, type CueParts } from './cue-pages';
+import { setupDrawer } from './drawer';
 import { follow, type FollowEvent, type FollowMode } from './follower';
 import { lookupText, tapTolerance, tokenAt } from './hit-test';
 import { lineBoxes } from './line-boxes';
@@ -23,10 +27,10 @@ import { createOcr, type Ocr } from './ocr';
 import { defaultRtl } from './paging';
 import { loadPdf, type PdfDoc } from './pdf';
 import { nextPage } from './read-order';
+import { scrollTarget } from './scroll';
 import { say, showPlayer, showReading } from './status';
 import { isAndroid, SubRead } from './subread';
 import { lastCueAt, parseSubtitles, type Cue } from './subtitles';
-import { createPageView, type Marks } from './view';
 import {
   bookKey,
   clearPages,
@@ -37,6 +41,7 @@ import {
   putSrt,
   type PageEntry,
 } from './token-cache';
+import { createPageView, type Marks } from './view';
 
 /** Page width in pixels for OCR and the text layer. Boxes are stored in this scale. */
 const OCR_WIDTH = 1600;
@@ -122,7 +127,8 @@ const state = {
 
 const view = createPageView(ui, marks);
 
-const desktop = window.matchMedia('(min-width: 900px)');
+// The cue list can show the cue of now only when the drawer opens.
+const drawer = setupDrawer(ui, () => scrollCueList(state.activeCue));
 
 const nav = setupNav(
   ui,
@@ -130,7 +136,7 @@ const nav = setupNav(
     pages: () => state.pdf?.numPages ?? 0,
     current: () => state.currentPage,
     rtl: () => ui.rtl.checked,
-    drawerOpen: () => !desktop.matches && document.body.classList.contains('menu-open'),
+    drawerOpen: drawer.covers,
   },
   turnByUser,
 );
@@ -202,27 +208,6 @@ function sayError(err: unknown): void {
   say(errorMessage(err, isAndroid));
 }
 
-// --- Drawer ---
-
-function setMenu(open: boolean): void {
-  document.body.classList.toggle('menu-open', open);
-  ui.menu.setAttribute('aria-expanded', String(open));
-}
-
-ui.menu.addEventListener('click', () => setMenu(!document.body.classList.contains('menu-open')));
-
-// A tap outside the drawer closes the drawer.
-document.addEventListener('click', (e) => {
-  const target = e.target as Node;
-  if (
-    document.body.classList.contains('menu-open') &&
-    !ui.panel.contains(target) &&
-    !ui.menu.contains(target)
-  ) {
-    setMenu(false);
-  }
-});
-
 // --- The PDF ---
 
 ui.openPdf.addEventListener('click', () => ui.pdfFile.click());
@@ -230,6 +215,7 @@ ui.openPdf.addEventListener('click', () => ui.pdfFile.click());
 ui.pdfFile.addEventListener('change', async () => {
   const file = ui.pdfFile.files?.[0];
   if (!file) return;
+  drawer.closeOnPhone();
   try {
     state.readSeq++;
     await state.pdf?.destroy();
@@ -382,6 +368,7 @@ function loadSubtitles(text: string, source: string): void {
 ui.subFile.addEventListener('change', async () => {
   const file = ui.subFile.files?.[0];
   if (!file) return;
+  drawer.closeOnPhone();
   loadSubtitles(await file.text(), file.name);
 });
 
@@ -479,20 +466,36 @@ function renderCueList(): void {
       const span = state.spans[i];
       if (span && !span.matched) li.classList.add('unmatched');
       if (i === state.activeCue) li.classList.add('active');
-      li.addEventListener('click', () => seek(cue.start * 1000));
+      li.addEventListener('click', () => {
+        drawer.closeOnPhone();
+        seek(cue.start * 1000);
+      });
       return li;
     }),
   );
+  scrollCueList(state.activeCue);
 }
 
 function markCueInList(i: number): void {
   const items = ui.cues.children;
   items[state.activeCue]?.classList.remove('active');
-  const item = items[i];
-  if (item) {
-    item.classList.add('active');
-    item.scrollIntoView({ block: 'nearest' });
-  }
+  items[i]?.classList.add('active');
+  scrollCueList(i);
+}
+
+/**
+ * Scrolls the cue list so that cue `i` shows, while the list shows. Only
+ * the list scrolls: scrollIntoView also scrolled the menu, and the
+ * settings went out of view.
+ */
+function scrollCueList(i: number): void {
+  const item = ui.cues.children[i];
+  if (!(item instanceof HTMLElement) || !drawer.shows()) return;
+  const list = ui.cues;
+  const mark = { top: item.offsetTop, bottom: item.offsetTop + item.offsetHeight };
+  const shown = { top: list.scrollTop, height: list.clientHeight };
+  const top = scrollTarget(mark, shown, list.scrollHeight - list.clientHeight);
+  if (top !== null) list.scrollTop = top;
 }
 
 // --- The follow ---

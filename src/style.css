@@ -277,10 +277,20 @@ body.menu-open #panel {
   width: 100%;
 }
 
+/*
+ * The cue list has its own scroll box: it takes the free height of the
+ * menu, at least 12rem. It scrolls to the cue of now, and the settings
+ * above it stay.
+ */
 #cues {
+  position: relative;
+  flex: 1 0 12rem;
+  min-height: 12rem;
+  overflow-y: auto;
   padding-left: 1.5rem;
   margin: 0;
   font-size: 0.9rem;
+  border-top: 1px solid #8884;
 }
 
 #cues li {
@@ -405,7 +415,7 @@ body.zoomed #viewer {
     grid-template-rows: var(--topbar) auto 1fr;
   }
 
-  #menu {
+  #topbar #menu {
     display: none;
   }
 
