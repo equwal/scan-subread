@@ -1,6 +1,7 @@
 import fc from 'fast-check';
 import { describe, expect, it } from 'vitest';
 import type { OcrToken } from '../src/align';
+import { isCjk } from '../src/book-text';
 import { LOOKUP_LENGTH, lookupText, scanText, tokenAt } from '../src/hit-test';
 
 /** Tokens for one page: `lines` laid out left to right, 10 px per character. */
@@ -70,6 +71,21 @@ function wordTokens(words: string[], page = 0, line = 0): OcrToken[] {
   return tokens;
 }
 
+/** Tokens of a page of text lines, a word id per word. A space separates two words. */
+function pageTokens(lines: string[], page = 0): OcrToken[] {
+  return lines.flatMap((line, row) => wordTokens(line.split(' '), page, page * 100 + row));
+}
+
+/** Index of the token of the `n`-th `ch` (from 0) on line `line`. */
+function tapOn(tokens: readonly OcrToken[], line: number, ch: string, n = 0): number {
+  let seen = 0;
+  for (let i = 0; i < tokens.length; i++) {
+    const t = tokens[i]!;
+    if (t.line === line && t.text === ch && seen++ === n) return i;
+  }
+  throw new Error(`No ${ch} number ${n} on line ${line}`);
+}
+
 describe('scanText', () => {
   it('reads to the end of the line, up to the limit', () => {
     const tokens = tokensOf(['吾輩は猫である', '名前はまだ無い']);
@@ -110,19 +126,77 @@ describe('lookupText', () => {
   });
 
   it('does not cross to the next page', () => {
-    const tokens = [...tokensOf(['abcdef'], 0), ...tokensOf(['ghijkl'], 1)];
-    expect(lookupText(tokens, 4)).toBe('ef');
-    expect(lookupText(tokens, 10)).toBe('kl');
+    const tokens = [...wordTokens(['abc', 'def'], 0, 0), ...wordTokens(['ghi', 'jkl'], 1, 100)];
+    expect(lookupText(tokens, 4)).toBe('def');
+    expect(lookupText(tokens, 10)).toBe('jkl');
   });
 
   it('stops at the lookup length', () => {
     const tokens = tokensOf(['a'.repeat(60), 'b'.repeat(60)]);
     expect(lookupText(tokens, 0)).toBe('a'.repeat(LOOKUP_LENGTH));
     // A line break is a word break: a space goes between the two lines.
-    expect(lookupText(tokens, 58)).toBe('aa ' + 'b'.repeat(LOOKUP_LENGTH - 2));
+    const wrapped = [
+      ...wordTokens(['a'.repeat(58), 'aa'], 0, 0),
+      ...wordTokens(['b'.repeat(60)], 0, 1),
+    ];
+    expect(lookupText(wrapped, 58)).toBe('aa ' + 'b'.repeat(LOOKUP_LENGTH - 2));
   });
 
-  it('never returns more than the lookup length, and always starts with the tapped character', () => {
+  it('starts at the first letter of a word that is not CJK', () => {
+    const tokens = [
+      ...pageTokens([
+        'The morning sun rose over the quiet hills,',
+        'and the village below began to stir.',
+        'Far away, a bell rang nine slow times.',
+        'with nothing more than light and sound.',
+      ]),
+      ...pageTokens(['It rolled across the fields and woke the geese,'], 1),
+    ];
+    expect(lookupText(tokens, tapOn(tokens, 0, 'r'))).toBe(
+      'morning sun rose over the quiet hills,',
+    );
+    expect(lookupText(tokens, tapOn(tokens, 2, 'e'))).toBe('bell rang nine slow times.');
+    expect(lookupText(tokens, tapOn(tokens, 100, 't'))).toBe(
+      'It rolled across the fields and woke the geese,',
+    );
+    // A punctuation mark in a word also gives the word.
+    expect(lookupText(tokens, tapOn(tokens, 0, ','))).toBe('hills,');
+    expect(lookupText(tokens, tapOn(tokens, 3, '.'))).toBe('sound.');
+  });
+
+  it('stops at a CJK character when it looks for the start of a word', () => {
+    // Japanese OCR can give one word for a whole line.
+    const tokens = wordTokens(['今日は2026年9月26日です。']);
+    expect(lookupText(tokens, tapOn(tokens, 0, '6'))).toBe('2026年9月26日です。');
+    expect(lookupText(tokens, tapOn(tokens, 0, '9'))).toBe('9月26日です。');
+  });
+
+  it('skips punctuation at the start, and gives nothing when only punctuation is left', () => {
+    const tokens = tokensOf([
+      '吾輩は猫である。名前はまだ無い。',
+      'どこで生れたかとんと見当がつかぬ。',
+      '人間中で一番獰悪な種族であったそうだ。',
+    ]);
+    expect(lookupText(tokens, tapOn(tokens, 0, '。'))).toBe('名前はまだ無い。');
+    expect(lookupText(tokens, tapOn(tokens, 0, '。', 1))).toBe('');
+    expect(lookupText(tokens, tapOn(tokens, 2, '。'))).toBe('');
+    const quoted = wordTokens(['"Hello,"', 'she', 'said.']);
+    expect(lookupText(quoted, 0)).toBe('Hello," she said.');
+  });
+
+  it('adds no next line after the end of a sentence', () => {
+    const tokens = tokensOf([
+      '吾輩は猫である。名前はまだ無い。',
+      'どこで生れたかとんと見当がつかぬ。',
+    ]);
+    expect(lookupText(tokens, tapOn(tokens, 0, '無'))).toBe('無い。');
+    const quote = tokensOf(['彼は言った「猫だ」', '次の行']);
+    expect(lookupText(quote, tapOn(quote, 0, '猫'))).toBe('猫だ」');
+    const english = [...wordTokens(['the', 'end.'], 0, 0), ...wordTokens(['Then', 'more.'], 0, 1)];
+    expect(lookupText(english, 3)).toBe('end.');
+  });
+
+  it('never returns more than the lookup length, and starts at the tapped CJK character', () => {
     const line = fc.stringMatching(/^[\p{L}]{1,50}$/u);
     fc.assert(
       fc.property(fc.array(line, { minLength: 1, maxLength: 4 }), fc.nat(), (lines, pick) => {
@@ -130,8 +204,25 @@ describe('lookupText', () => {
         const start = pick % tokens.length;
         const text = lookupText(tokens, start);
         expect([...text.replace(/ /g, '')].length).toBeLessThanOrEqual(LOOKUP_LENGTH);
-        expect(text.startsWith(tokens[start]!.text)).toBe(true);
+        if (isCjk(tokens[start]!.text)) expect(text.startsWith(tokens[start]!.text)).toBe(true);
       }),
+    );
+  });
+
+  it('starts at the first letter of the tapped Latin word', () => {
+    const word = fc.stringMatching(/^[A-Za-z]{1,10}$/);
+    fc.assert(
+      fc.property(
+        fc.array(word, { minLength: 1, maxLength: 8 }),
+        fc.nat(),
+        fc.nat(),
+        (words, pickWord, pickLetter) => {
+          const k = pickWord % words.length;
+          const tap = words.slice(0, k).join('').length + (pickLetter % words[k]!.length);
+          const text = lookupText(wordTokens(words), tap);
+          expect(text.split(' ')[0]).toBe(words[k]);
+        },
+      ),
     );
   });
 });

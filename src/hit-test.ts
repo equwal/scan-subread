@@ -5,7 +5,7 @@
 // 3. `lookupText` is the text that goes to the dictionary app.
 
 import type { OcrToken } from './align';
-import { joinWords } from './book-text';
+import { isCjk, joinWords } from './book-text';
 
 /** Longest scan string, in characters. */
 export const SCAN_LENGTH = 16;
@@ -13,8 +13,17 @@ export const SCAN_LENGTH = 16;
 /** Longest lookup text, in characters. */
 export const LOOKUP_LENGTH = 40;
 
-/** When the line ends within this many characters, the next line is added. */
+/**
+ * When the line ends within this many characters, the next line is added,
+ * unless the line ends a sentence.
+ */
 export const LOOKUP_SHORT_LINE = 4;
+
+/** A token of punctuation or symbols only. A lookup does not start with one. */
+const PUNCTUATION = /^[\p{P}\p{S}]+$/u;
+
+/** Text that ends a sentence. No next line follows it in a lookup. */
+const SENTENCE_END = /[。．！？.!?」』]$/u;
 
 /** Distance from a point to a box. Zero inside the box. */
 function boxDistance(box: OcrToken['bbox'], x: number, y: number): number {
@@ -94,16 +103,38 @@ function nextLine(tokens: readonly OcrToken[], start: number): number {
 }
 
 /**
- * The text for a dictionary lookup: from the tapped character to the end
- * of its line. When the line ends within `LOOKUP_SHORT_LINE` characters,
- * the next line of the same page follows, so a word that wraps is whole.
+ * Index of the first token of the word of token `i`: the same word id on
+ * the same line. The search stops at a CJK token, because Japanese OCR can
+ * give one word for a whole line.
  */
-export function lookupText(tokens: readonly OcrToken[], start: number): string {
-  const first = tokens[start];
+function wordStart(tokens: readonly OcrToken[], i: number): number {
+  const { line, word } = tokens[i]!;
+  while (i > 0) {
+    const prev = tokens[i - 1]!;
+    if (prev.line !== line || prev.word !== word || isCjk(prev.text)) break;
+    i--;
+  }
+  return i;
+}
+
+/**
+ * The text for a dictionary lookup, to the end of the line. A CJK
+ * character starts it where the tap lands, because a dictionary app scans
+ * from there. Another character starts it at the first letter of its
+ * word. Punctuation and symbols at the start are skipped. When only they
+ * are left on the line, the text is empty. When the line ends within
+ * `LOOKUP_SHORT_LINE` characters and does not end a sentence, the next
+ * line of the same page follows, so a word that wraps is whole.
+ */
+export function lookupText(tokens: readonly OcrToken[], tapped: number): string {
+  const first = tokens[tapped];
   if (!first) return '';
+  let start = isCjk(first.text) ? tapped : wordStart(tokens, tapped);
+  while (tokens[start]?.line === first.line && PUNCTUATION.test(tokens[start]!.text)) start++;
+  if (tokens[start]?.line !== first.line) return '';
   const text = scanText(tokens, start, LOOKUP_LENGTH);
   const length = [...text.replace(/ /g, '')].length;
-  if (length > LOOKUP_SHORT_LINE) return text;
+  if (length > LOOKUP_SHORT_LINE || SENTENCE_END.test(text)) return text;
   const next = nextLine(tokens, start);
   if (next < 0 || tokens[next]!.page !== first.page) return text;
   return joinWords([text, scanText(tokens, next, LOOKUP_LENGTH - length)]);
