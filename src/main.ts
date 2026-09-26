@@ -8,9 +8,18 @@ import { LocalAudioClock, OverlayClock, type ClockSource, type ClockState } from
 import { cueMoved, follow, type FollowMode } from './follower';
 import { lookupText, tokenAt } from './hit-test';
 import { lineBoxes } from './line-boxes';
+import {
+  clockText,
+  errorMessage,
+  pagesReadText,
+  pdfLoadedText,
+  playerMessage,
+  readingText,
+} from './messages';
 import { createOcr, type Ocr } from './ocr';
 import { loadPdf, type PdfDoc } from './pdf';
 import { nextPage } from './read-order';
+import { say, showPlayer, showReading } from './status';
 import { isAndroid, SubRead } from './subread';
 import { cueIndexAt, parseSubtitles, type Cue } from './subtitles';
 import {
@@ -36,7 +45,6 @@ const BOX_PAD = 2;
 /** Milliseconds to wait after a page is read before the cues are aligned again. */
 const ALIGN_DEBOUNCE = 300;
 
-const OVERLAY_RELEASES = 'https://github.com/equwal/subread-overlay/releases/latest';
 const SUBREAD_RELEASES = 'https://github.com/equwal/subread-android/releases/latest';
 
 function el<T extends HTMLElement>(id: string): T {
@@ -60,10 +68,6 @@ const ui = {
   audioRow: el<HTMLElement>('audio-row'),
   audioFile: el<HTMLInputElement>('audio-file'),
   audio: el<HTMLAudioElement>('audio'),
-  playerStatus: el<HTMLDivElement>('player-status'),
-  pagesStatus: el<HTMLDivElement>('pages-status'),
-  status: el<HTMLDivElement>('status'),
-  progress: el<HTMLProgressElement>('progress'),
   follow: el<HTMLFieldSetElement>('follow'),
   lang: el<HTMLSelectElement>('lang'),
   forceOcr: el<HTMLInputElement>('force-ocr'),
@@ -154,16 +158,9 @@ ui.forceOcr.addEventListener('change', () => {
   void readBook();
 });
 
-function setStatus(text: string, link?: { href: string; text: string }): void {
-  ui.status.textContent = text;
-  if (link) {
-    const a = document.createElement('a');
-    a.href = link.href;
-    a.target = '_blank';
-    a.rel = 'noopener';
-    a.textContent = link.text;
-    ui.status.append(' ', a);
-  }
+/** Shows a command that failed in the strip. */
+function sayError(err: unknown): void {
+  say(errorMessage(err, isAndroid));
 }
 
 // --- Drawer ---
@@ -204,13 +201,13 @@ ui.pdfFile.addEventListener('change', async () => {
     state.activeCue = -1;
     state.markedCue = -1;
     ui.makeSubs.disabled = false;
-    setStatus(`PDF loaded: ${state.pdf.numPages} pages.`);
+    say(pdfLoadedText(state.pdf.numPages));
     await showPage(0);
     const saved = await getSrt(bookKey(file));
     if (saved) loadSubtitles(saved, 'the last SubRead run');
     void readBook();
   } catch (err) {
-    setStatus(`Cannot open PDF: ${String(err)}`);
+    say(`Cannot open PDF: ${String(err)}`);
   }
 });
 
@@ -259,24 +256,27 @@ async function readBook(): Promise<void> {
   state.spans = [];
   state.cuePages = [];
   state.markedCue = -1;
-  ui.pagesStatus.textContent = `Pages: 0/${pdf.numPages} read.`;
-  const pending = new Set(Array.from({ length: pdf.numPages }, (_, i) => i));
+  const total = pdf.numPages;
+  const pending = new Set(Array.from({ length: total }, (_, i) => i));
+  const counts = { text: 0, ocr: 0 };
+  const read = (): number => counts.text + counts.ocr;
+  /** The page that is read now. */
+  let page = -1;
   // The OCR worker starts on the first page that needs it.
   const ocr: { started?: Promise<Ocr> } = {};
   const getOcr = (): Promise<Ocr> => {
     ocr.started ??= createOcr(ui.lang.value, (p) => {
-      ui.progress.value = p;
+      if (seq === state.readSeq) {
+        showReading(readingText(read(), total, `page ${page + 1}: OCR ${Math.round(p * 100)}%`));
+      }
     });
     return ocr.started;
   };
-  const counts = { text: 0, ocr: 0 };
   try {
     while (pending.size > 0) {
-      const page = nextPage(pending, state.currentPage);
+      page = nextPage(pending, state.currentPage);
       pending.delete(page);
-      ui.progress.hidden = false;
-      ui.progress.value = 0;
-      setStatus(`Reading page ${page + 1} of ${pdf.numPages}...`);
+      showReading(readingText(read(), total, `page ${page + 1}`));
       const entry = await readPage(pdf, file, page, getOcr);
       if (seq !== state.readSeq) return; // Another book or another setting took over.
       counts[entry.source]++;
@@ -284,18 +284,21 @@ async function readBook(): Promise<void> {
       // Put the tokens of the page at their place in page order.
       const at = state.pages.slice(0, page).reduce((n, p) => n + (p?.tokens.length ?? 0), 0);
       state.tokens.splice(at, 0, ...entry.tokens);
-      setStatus(`Page ${page + 1}: ${entry.source === 'text' ? 'text layer' : 'OCR'}.`);
-      ui.pagesStatus.textContent =
-        `Pages: ${counts.text + counts.ocr}/${pdf.numPages} read ` +
-        `(${counts.text} text layer, ${counts.ocr} OCR).`;
+      const how = entry.source === 'text' ? 'text layer' : 'OCR';
+      showReading(readingText(read(), total, `page ${page + 1}: ${how}`));
       if (page === state.currentPage) drawBoxes();
       scheduleAlign();
     }
+    const matched = align();
+    say(
+      pagesReadText(counts) +
+        (matched === null ? '' : ` ${matched}/${state.cues.length} cues matched.`),
+    );
   } catch (err) {
-    if (seq === state.readSeq) setStatus(`Cannot read the pages: ${String(err)}`);
+    if (seq === state.readSeq) say(`Cannot read the pages: ${String(err)}`);
   } finally {
     if (ocr.started) await (await ocr.started).terminate().catch(() => undefined);
-    if (seq === state.readSeq) ui.progress.hidden = true;
+    if (seq === state.readSeq) showReading(null);
   }
 }
 
@@ -307,7 +310,7 @@ function allPagesRead(): boolean {
 
 ui.clearCache.addEventListener('click', async () => {
   await clearPages();
-  setStatus('Page cache cleared.');
+  say('Page cache cleared.');
 });
 
 // --- Subtitles ---
@@ -321,10 +324,13 @@ function loadSubtitles(text: string, source: string): void {
   state.cuePages = [];
   state.activeCue = -1;
   state.markedCue = -1;
-  setStatus(`${state.cues.length} cues loaded from ${source}.`);
   ui.syncPage.disabled = state.cues.length === 0;
   renderCueList();
-  align();
+  const matched = align();
+  say(
+    `${state.cues.length} cues loaded from ${source}.` +
+      (matched === null ? '' : ` ${matched} matched to the pages read so far.`),
+  );
   offerSrt(text);
 }
 
@@ -345,7 +351,7 @@ function offerSrt(text: string): void {
     ui.srtDownload.download = name;
   }
   ui.srtShare.onclick = () => {
-    SubRead.shareText({ name, text }).catch((err) => setStatus(String(err)));
+    SubRead.shareText({ name, text }).catch(sayError);
   };
 }
 
@@ -399,15 +405,17 @@ function scheduleAlign(): void {
   state.alignTimer = setTimeout(align, ALIGN_DEBOUNCE);
 }
 
-/** Align the cues to the pages read so far. */
-function align(): void {
+/**
+ * Align the cues to the pages read so far. Gives the count of matched
+ * cues, or null when there is nothing to align.
+ */
+function align(): number | null {
+  if (state.alignTimer) clearTimeout(state.alignTimer);
   state.alignTimer = null;
-  if (!state.aligner || state.cues.length === 0 || state.tokens.length === 0) return;
+  if (!state.aligner || state.cues.length === 0 || state.tokens.length === 0) return null;
   const before = state.cuePages;
   state.spans = state.aligner.spans(state.pages.map((p) => p?.tokens));
   state.cuePages = state.spans.map((s) => (s.matched ? state.tokens[s.start]!.page : null));
-  const matched = state.cuePages.filter((p) => p !== null).length;
-  setStatus(`${matched}/${state.cues.length} cues matched to the page text.`);
   renderCueList();
   // Follow again only when the alignment moved the cue of now, for
   // example when it became matched. A page read in the background must not
@@ -415,6 +423,7 @@ function align(): void {
   if (state.clock && cueMoved(before, state.cuePages, clockCue(state.clock))) {
     applyClock({ ...state.clock, seeked: true });
   }
+  return state.cuePages.filter((p) => p !== null).length;
 }
 
 // --- Cue list ---
@@ -428,7 +437,7 @@ function renderCueList(): void {
       const span = state.spans[i];
       if (span && !span.matched) li.classList.add('unmatched');
       if (i === state.activeCue) li.classList.add('active');
-      li.addEventListener('click', () => void clock.seek(cue.start * 1000));
+      li.addEventListener('click', () => void clock.seek(cue.start * 1000).catch(sayError));
       return li;
     }),
   );
@@ -446,35 +455,10 @@ function markCueInList(i: number): void {
 
 // --- The follow ---
 
-function clockText(ms: number): string {
-  const s = Math.floor(ms / 1000);
-  const pad = (n: number): string => String(n).padStart(2, '0');
-  const h = Math.floor(s / 3600);
-  return `${h > 0 ? `${h}:` : ''}${pad(Math.floor((s % 3600) / 60))}:${pad(s % 60)}`;
-}
-
 function showPlayerStatus(s: ClockState): void {
-  ui.playerStatus.replaceChildren();
   ui.play.disabled = s.error === 'no_overlay' || (!isAndroid && s.error === 'no_player');
   ui.play.textContent = s.playing ? '⏸' : '▶';
-  const name = isAndroid ? 'Player' : 'Audio';
-  if (s.error === 'no_overlay') {
-    ui.playerStatus.append('SubRead Overlay not installed. ');
-    const a = document.createElement('a');
-    a.href = OVERLAY_RELEASES;
-    a.target = '_blank';
-    a.rel = 'noopener';
-    a.textContent = 'Get it';
-    ui.playerStatus.append(a);
-  } else if (s.error === 'no_notification_access') {
-    ui.playerStatus.textContent = 'Allow notification access in SubRead Overlay.';
-  } else if (s.error === 'no_player') {
-    ui.playerStatus.textContent = isAndroid ? 'No player.' : 'No audio file.';
-  } else if (s.positionMs === null) {
-    ui.playerStatus.textContent = `${name}: no position.`;
-  } else {
-    ui.playerStatus.textContent = `${name}: ${clockText(s.positionMs)}, ${s.playing ? 'playing' : 'paused'}`;
-  }
+  showPlayer(playerMessage(s, isAndroid));
 }
 
 /** The cue at the position of a clock state, or -1. */
@@ -511,20 +495,17 @@ clock.start(applyClock);
 
 ui.play.addEventListener('click', () => {
   const action = state.clock?.playing ? clock.pause() : clock.play();
-  action.catch((err) => setStatus(String(err)));
+  action.catch(sayError);
 });
 
 ui.syncPage.addEventListener('click', () => {
   const i = state.cuePages.indexOf(state.currentPage);
   if (i < 0) {
-    setStatus('No cue of the subtitles is on this page.');
+    say('No cue of the subtitles is on this page.');
     return;
   }
   const ms = state.cues[i]!.start * 1000;
-  clock.seek(ms).then(
-    () => setStatus(`Audio moved to ${clockText(ms)}.`),
-    (err) => setStatus(String(err)),
-  );
+  clock.seek(ms).then(() => say(`Audio moved to ${clockText(ms)}.`), sayError);
 });
 
 ui.audioFile.addEventListener('change', () => {
@@ -586,7 +567,7 @@ ui.page.addEventListener('click', async (e) => {
   const t = tokenAt(state.tokens, state.currentPage, x, y, TAP_TOLERANCE * size.width);
   if (t < 0) return;
   const text = lookupText(state.tokens, t);
-  setStatus(`Lookup: "${text}"`);
+  say(`Lookup: "${text}"`);
   const pause = ui.pauseLookup.checked && state.clock?.playing === true && !state.lookupPaused;
   try {
     if (pause) {
@@ -596,7 +577,7 @@ ui.page.addEventListener('click', async (e) => {
     const { closed } = await SubRead.lookup({ text });
     if (closed && state.lookupPaused) await clock.play();
   } catch (err) {
-    setStatus(`Lookup failed: ${String(err)}`);
+    say(`Lookup failed: ${String(err)}`);
   } finally {
     if (pause) state.lookupPaused = false;
   }
@@ -616,7 +597,7 @@ async function loadDictionaries(): Promise<void> {
 }
 
 ui.dict.addEventListener('change', () => {
-  SubRead.setDictionary({ component: ui.dict.value }).catch((err) => setStatus(String(err)));
+  SubRead.setDictionary({ component: ui.dict.value }).catch(sayError);
 });
 
 // --- Start ---
@@ -624,4 +605,4 @@ ui.dict.addEventListener('change', () => {
 loadSettings();
 ui.make.hidden = !isAndroid;
 ui.audioRow.hidden = isAndroid;
-if (isAndroid) void loadDictionaries().catch((err) => setStatus(String(err)));
+if (isAndroid) void loadDictionaries().catch(sayError);

@@ -18,6 +18,12 @@
       </button>
     </header>
 
+    <div id="strip">
+      <span id="player-status"></span>
+      <span id="pages-status" hidden></span>
+      <span id="status" aria-live="polite"></span>
+    </div>
+
     <aside id="panel">
       <h1>Scan Subread</h1>
       <p class="hint">
@@ -51,11 +57,6 @@
         <label>Audio (web only) <input id="audio-file" type="file" accept="audio/*" /></label>
         <audio id="audio" controls></audio>
       </section>
-
-      <div id="player-status" class="hint">Player: not read yet.</div>
-      <div id="pages-status" class="hint"></div>
-      <div id="status" aria-live="polite"></div>
-      <progress id="progress" max="1" value="0" hidden></progress>
 
       <fieldset id="follow">
         <legend>Follow the audio</legend>

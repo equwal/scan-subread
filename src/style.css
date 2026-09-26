@@ -40,6 +40,42 @@ body {
   white-space: nowrap;
 }
 
+/* The status strip: the player, the reading of the pages, the last event. */
+#strip {
+  flex: none;
+  box-sizing: border-box;
+  min-height: 1.5rem;
+  display: flex;
+  flex-wrap: wrap;
+  align-items: baseline;
+  column-gap: 0.75rem;
+  padding: 0.15rem 0.5rem;
+  font-size: 0.8rem;
+  line-height: 1.3;
+  border-bottom: 1px solid #8884;
+  overflow-wrap: anywhere;
+}
+
+#strip > * {
+  min-width: 0;
+}
+
+#strip a {
+  color: inherit;
+}
+
+#pages-status {
+  opacity: 0.8;
+}
+
+#status {
+  transition: opacity 600ms ease-out;
+}
+
+#status.faded {
+  opacity: 0;
+}
+
 #panel {
   position: fixed;
   top: var(--topbar);
@@ -84,11 +120,6 @@ body.menu-open #panel {
 
 #panel input[type='file'] {
   max-width: 100%;
-}
-
-#status {
-  font-size: 0.85rem;
-  min-height: 1.2em;
 }
 
 #topbar button {
@@ -139,16 +170,11 @@ body.menu-open #panel {
   font-size: 0.85rem;
 }
 
-#make-status,
-#player-status,
-#pages-status,
-#status {
+#make-status {
   word-break: break-word;
 }
 
-#status a,
-#make-status a,
-#player-status a {
+#make-status a {
   color: inherit;
 }
 
@@ -239,7 +265,7 @@ body.menu-open #panel {
   body {
     display: grid;
     grid-template-columns: var(--panel-width) 1fr;
-    grid-template-rows: var(--topbar) 1fr;
+    grid-template-rows: var(--topbar) auto 1fr;
   }
 
   #menu {
@@ -251,9 +277,15 @@ body.menu-open #panel {
     grid-row: 1;
   }
 
+  #strip {
+    grid-column: 2;
+    grid-row: 2;
+    min-width: 0;
+  }
+
   #panel {
     grid-column: 1;
-    grid-row: 1 / 3;
+    grid-row: 1 / 4;
     position: static;
     width: auto;
     transform: none;
@@ -262,7 +294,7 @@ body.menu-open #panel {
 
   #main {
     grid-column: 2;
-    grid-row: 2;
+    grid-row: 3;
     min-width: 0;
   }
 
