@@ -25,6 +25,18 @@ const PUNCTUATION = /^[\p{P}\p{S}]+$/u;
 /** Text that ends a sentence. No next line follows it in a lookup. */
 const SENTENCE_END = /[。．！？.!?」』]$/u;
 
+/** How far from a character a tap may land, in CSS pixels: about the size of a finger. */
+export const TAP_CSS = 24;
+
+/**
+ * The tap tolerance in page pixels. The page is `pageWidth` pixels wide
+ * and shows `shownWidth` CSS pixels wide. A pinch zoom of `zoom` makes a
+ * CSS pixel bigger on the screen, so the finger covers fewer of them.
+ */
+export function tapTolerance(pageWidth: number, shownWidth: number, zoom = 1): number {
+  return (TAP_CSS * pageWidth) / (shownWidth * Math.max(1, zoom));
+}
+
 /** Distance from a point to a box. Zero inside the box. */
 function boxDistance(box: OcrToken['bbox'], x: number, y: number): number {
   const dx = Math.max(box.x0 - x, 0, x - box.x1);

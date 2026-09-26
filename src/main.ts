@@ -6,11 +6,12 @@ import { createAligner, type Aligner, type OcrToken, type TokenSpan } from './al
 import { bookText } from './book-text';
 import { LocalAudioClock, OverlayClock, type ClockSource, type ClockState } from './clock-source';
 import { cueMoved, follow, type FollowMode } from './follower';
-import { lookupText, tokenAt } from './hit-test';
+import { lookupText, tapTolerance, tokenAt } from './hit-test';
 import { lineBoxes } from './line-boxes';
 import {
   clockText,
   errorMessage,
+  notReadText,
   pagesReadText,
   pdfLoadedText,
   playerMessage,
@@ -35,9 +36,6 @@ import {
 
 /** Page width in pixels for OCR and the text layer. Boxes are stored in this scale. */
 const OCR_WIDTH = 1600;
-
-/** How far from a character a tap may land, as a share of the page width. */
-const TAP_TOLERANCE = 0.015;
 
 /** The space around a box of the mark, in CSS pixels. */
 const BOX_PAD = 2;
@@ -71,7 +69,9 @@ const ui = {
   follow: el<HTMLFieldSetElement>('follow'),
   lang: el<HTMLSelectElement>('lang'),
   forceOcr: el<HTMLInputElement>('force-ocr'),
+  dictRow: el<HTMLLabelElement>('dict-row'),
   dict: el<HTMLSelectElement>('dict'),
+  pauseRow: el<HTMLLabelElement>('pause-row'),
   pauseLookup: el<HTMLInputElement>('pause-lookup'),
   clearCache: el<HTMLButtonElement>('clear-cache'),
   cues: el<HTMLOListElement>('cues'),
@@ -557,31 +557,76 @@ ui.next.addEventListener('click', () => void showPage(state.currentPage + 1));
 // --- Tap on a word ---
 
 /** Tap on the page: send the text under the tap to the dictionary. */
-ui.page.addEventListener('click', async (e) => {
+ui.page.addEventListener('click', (e) => {
   const canvas = ui.page.querySelector('canvas');
+  const pdf = state.pdf;
+  if (!canvas || !pdf) return;
   const size = state.pages[state.currentPage];
-  if (!canvas || !size) return;
+  if (!size) {
+    say(notReadText(state.pages.filter((p) => p).length, pdf.numPages));
+    return;
+  }
   const rect = canvas.getBoundingClientRect();
   const x = ((e.clientX - rect.left) / rect.width) * size.width;
   const y = ((e.clientY - rect.top) / rect.height) * size.height;
-  const t = tokenAt(state.tokens, state.currentPage, x, y, TAP_TOLERANCE * size.width);
+  const zoom = window.visualViewport?.scale ?? 1;
+  const t = tokenAt(
+    state.tokens,
+    state.currentPage,
+    x,
+    y,
+    tapTolerance(size.width, rect.width, zoom),
+  );
   if (t < 0) return;
   const text = lookupText(state.tokens, t);
+  // A tap on punctuation only gives no text.
+  if (text === '') return;
+  void (isAndroid ? lookUp(text) : copy(text));
+});
+
+/** The web has no dictionary app: the text goes to the clipboard. */
+async function copy(text: string): Promise<void> {
+  try {
+    await navigator.clipboard.writeText(text);
+    say(`Copied: "${text}"`);
+  } catch {
+    say(`Copy failed: "${text}"`);
+  }
+}
+
+/**
+ * Sends the text to the dictionary app. With "Pause on lookup", the
+ * player pauses first and plays again when the dictionary closes. When
+ * the pause fails, the lookup still runs.
+ */
+async function lookUp(text: string): Promise<void> {
   say(`Lookup: "${text}"`);
   const pause = ui.pauseLookup.checked && state.clock?.playing === true && !state.lookupPaused;
-  try {
-    if (pause) {
-      state.lookupPaused = true;
+  let paused = false;
+  if (pause) {
+    state.lookupPaused = true;
+    try {
       await clock.pause();
+      paused = true;
+    } catch (err) {
+      sayError(err);
     }
-    const { closed } = await SubRead.lookup({ text });
-    if (closed && state.lookupPaused) await clock.play();
+  }
+  // Play again when the dictionary closed, or when it did not open.
+  let resume = true;
+  try {
+    ({ closed: resume } = await SubRead.lookup({ text }));
   } catch (err) {
     say(`Lookup failed: ${String(err)}`);
+  }
+  try {
+    if (paused && resume) await clock.play();
+  } catch (err) {
+    sayError(err);
   } finally {
     if (pause) state.lookupPaused = false;
   }
-});
+}
 
 // --- Dictionaries (Android) ---
 
@@ -605,4 +650,7 @@ ui.dict.addEventListener('change', () => {
 loadSettings();
 ui.make.hidden = !isAndroid;
 ui.audioRow.hidden = isAndroid;
+// The web copies a lookup at once: there is no dictionary app to choose or to wait for.
+ui.dictRow.hidden = !isAndroid;
+ui.pauseRow.hidden = !isAndroid;
 if (isAndroid) void loadDictionaries().catch(sayError);
