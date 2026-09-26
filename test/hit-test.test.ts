@@ -99,6 +99,11 @@ describe('lookupText', () => {
     expect(lookupText(tokens, 3)).toBe('猫である名前はまだ無い');
   });
 
+  it('puts no space around ー when OCR gives it a word of its own', () => {
+    const tokens = wordTokens(['ニャ', 'ー', '泣いていた事だけは記憶している。']);
+    expect(lookupText(tokens, 0)).toBe('ニャー泣いていた事だけは記憶している。');
+  });
+
   it('joins a short line and the next line with a space', () => {
     const tokens = [...wordTokens(['the', 'end'], 0, 0), ...wordTokens(['of', 'it'], 0, 1)];
     expect(lookupText(tokens, 3)).toBe('end of it');

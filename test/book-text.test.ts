@@ -51,6 +51,28 @@ describe('bookText', () => {
     expect(joinWords(['名前', '。', 'まだ'])).toBe('名前。まだ');
   });
 
+  it('puts no space around the prolonged sound mark and the other kana marks', () => {
+    // OCR put ー in a word of its own. Its Script is Common, not Katakana.
+    const words = ['ニャ', 'ー', '泣いていた事だけは記憶している。'];
+    expect(joinWords(words)).toBe('ニャー泣いていた事だけは記憶している。');
+    expect(bookText(pageTokens(0, [words]))).toBe('ニャー泣いていた事だけは記憶している。\n');
+    for (const mark of ['ー', '・', '゛', '゜', '々', '〆']) {
+      expect(joinWords(['ア', mark, 'イ'])).toBe(`ア${mark}イ`);
+    }
+  });
+
+  it('puts no space between words of Han, kana, ー and ・, outside the BMP too', () => {
+    // Each list of words is one split of the string that the words make.
+    const word = fc.stringMatching(
+      /^[\p{Script=Han}\p{Script=Hiragana}\p{Script=Katakana}ー・]{1,6}$/u,
+    );
+    fc.assert(
+      fc.property(fc.array(word, { minLength: 1, maxLength: 8 }), (words) => {
+        expect(joinWords(words)).toBe(words.join(''));
+      }),
+    );
+  });
+
   it('returns an empty string for no tokens', () => {
     expect(bookText([])).toBe('');
   });

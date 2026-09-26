@@ -5,12 +5,23 @@
 
 import type { OcrToken } from './align';
 
-/** Han, kana and CJK punctuation: scripts that are written without spaces. */
-const CJK = /[\p{Script=Han}\p{Script=Hiragana}\p{Script=Katakana}　-〿＀-￯]/u;
+/**
+ * Han, kana and CJK punctuation: scripts that are written without spaces.
+ * Script_Extensions (scx) also include the characters that these scripts
+ * share, for example ー, ・, ゛ and ゜. Their Script is Common.
+ */
+const CJK = /^[\p{scx=Han}\p{scx=Hiragana}\p{scx=Katakana}　-〿＀-￯]/u;
+
+/** True when the first character of `text` is Han, kana or CJK punctuation. */
+export function isCjk(text: string): boolean {
+  return CJK.test(text);
+}
 
 /** True when a space belongs between two neighboring words. Not between two CJK words. */
 function needsSpace(prev: string, next: string): boolean {
-  return !(CJK.test(prev.slice(-1)) && CJK.test(next.slice(0, 1)));
+  // Split into code points: a character outside the BMP is two UTF-16 units.
+  const last = [...prev].at(-1) ?? '';
+  return !(isCjk(last) && isCjk(next));
 }
 
 /** One line from its words: a space between words, except between CJK words. */
