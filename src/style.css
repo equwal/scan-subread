@@ -7,6 +7,11 @@
   --panel-width: 22rem;
 }
 
+/* The hidden attribute wins over each `display` rule below, for example `.row`. */
+[hidden] {
+  display: none !important;
+}
+
 /* Phone layout: top bar, page below, controls in a drawer. */
 body {
   margin: 0;
