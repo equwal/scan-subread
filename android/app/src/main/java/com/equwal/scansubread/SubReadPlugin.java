@@ -14,6 +14,7 @@ import android.database.Cursor;
 import android.net.Uri;
 import android.os.Bundle;
 import android.provider.OpenableColumns;
+import android.view.WindowManager;
 import androidx.activity.result.ActivityResult;
 import androidx.core.content.FileProvider;
 import com.getcapacitor.JSArray;
@@ -44,6 +45,7 @@ import java.util.List;
  *   menu. The lookup resolves when the dictionary closes.
  * - The subtitle maker, through the intent API of the SubRead app
  *   (`space.subread.app.action.ALIGN`).
+ * - The screen, which stays on during read-along.
  */
 @CapacitorPlugin(name = "SubRead")
 public class SubReadPlugin extends Plugin {
@@ -152,6 +154,31 @@ public class SubReadPlugin extends Plugin {
             return;
         }
         call.resolve(lineObject(callPlayer("seek", String.valueOf(Math.max(0, ms)))));
+    }
+
+    // --- The screen ---
+
+    /**
+     * Keeps the screen on, or lets it turn off again. During read-along the
+     * user does not touch the screen, so without this the screen turns off.
+     */
+    @PluginMethod
+    public void keepAwake(PluginCall call) {
+        Boolean on = call.getBoolean("on");
+        if (on == null) {
+            call.reject("on is required.");
+            return;
+        }
+        // Only the UI thread can change the flags of the window.
+        getActivity()
+            .runOnUiThread(() -> {
+                if (on) {
+                    getActivity().getWindow().addFlags(WindowManager.LayoutParams.FLAG_KEEP_SCREEN_ON);
+                } else {
+                    getActivity().getWindow().clearFlags(WindowManager.LayoutParams.FLAG_KEEP_SCREEN_ON);
+                }
+                call.resolve();
+            });
     }
 
     // --- The dictionary, through ACTION_PROCESS_TEXT ---

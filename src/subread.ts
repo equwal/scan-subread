@@ -1,7 +1,8 @@
 // The bridge to the SubRead suite: the typed side of SubReadPlugin.java.
 //
 // On the web there is no suite. The fallback reports no overlay, copies a
-// lookup to the clipboard, and cannot make subtitles.
+// lookup to the clipboard, and cannot make subtitles. It keeps the screen on
+// with the Screen Wake Lock API when the browser has it.
 
 import { Capacitor, registerPlugin } from '@capacitor/core';
 
@@ -32,6 +33,12 @@ export interface SubReadPlugin {
   play(): Promise<StateLine>;
   pause(): Promise<StateLine>;
   seek(options: { ms: number }): Promise<StateLine>;
+  /**
+   * Keeps the screen on while `on` is true. During read-along the user does
+   * not touch the screen, so without this the screen turns off. On the web,
+   * a screen wake lock where the browser has one; errors are ignored.
+   */
+  keepAwake(options: { on: boolean }): Promise<void>;
   /** Opens the dictionary with the text. Resolves when the dictionary closes. */
   lookup(options: { text: string }): Promise<{ closed: boolean }>;
   dictionaries(): Promise<{ apps: DictionaryApp[]; chosen: string }>;
@@ -47,6 +54,9 @@ export interface SubReadPlugin {
 }
 
 class SubReadWeb implements SubReadPlugin {
+  /** The screen wake lock, while one is held. */
+  private wakeLock: WakeLockSentinel | null = null;
+
   private noOverlay(): Promise<StateLine> {
     return Promise.resolve({ line: 'error=no_overlay' });
   }
@@ -61,6 +71,19 @@ class SubReadWeb implements SubReadPlugin {
   }
   seek(): Promise<StateLine> {
     return this.noOverlay();
+  }
+  async keepAwake({ on }: { on: boolean }): Promise<void> {
+    try {
+      if (!on) {
+        const lock = this.wakeLock;
+        this.wakeLock = null;
+        await lock?.release();
+      } else if ('wakeLock' in navigator && (this.wakeLock === null || this.wakeLock.released)) {
+        this.wakeLock = await navigator.wakeLock.request('screen');
+      }
+    } catch {
+      // No wake lock here: a hidden page, a page without HTTPS, or a refusal.
+    }
   }
   async lookup({ text }: { text: string }): Promise<{ closed: boolean }> {
     try {
