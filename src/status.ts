@@ -37,14 +37,15 @@ function fill(target: HTMLElement, m: Message): void {
 
 let lastPlayer = '';
 
-/** Shows the state of the player. */
-export function showPlayer(m: Message): void {
+/** Shows the state of the player. Null hides this part. */
+export function showPlayer(m: Message | null): void {
   // The clock sends a state four times a second. A new link under the
   // finger can lose a tap, so the part changes only when the text changes.
-  const key = `${m.text}|${m.link?.href ?? ''}`;
+  const key = m ? `${m.text}|${m.link?.href ?? ''}` : '';
   if (key === lastPlayer) return;
   lastPlayer = key;
-  fill(player, m);
+  player.hidden = m === null;
+  fill(player, m ?? { text: '' });
 }
 
 /** Shows how far the reading of the pages is. Null hides this part. */

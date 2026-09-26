@@ -75,12 +75,14 @@ const ui = {
   pauseLookup: el<HTMLInputElement>('pause-lookup'),
   clearCache: el<HTMLButtonElement>('clear-cache'),
   cues: el<HTMLOListElement>('cues'),
-  prev: el<HTMLButtonElement>('prev'),
-  next: el<HTMLButtonElement>('next'),
+  pageLeft: el<HTMLButtonElement>('page-left'),
+  pageRight: el<HTMLButtonElement>('page-right'),
   play: el<HTMLButtonElement>('play'),
   syncPage: el<HTMLButtonElement>('sync-page'),
-  pageLabel: el<HTMLSpanElement>('page-label'),
+  pageLabel: el<HTMLButtonElement>('page-label'),
   viewer: el<HTMLDivElement>('viewer'),
+  empty: el<HTMLElement>('empty'),
+  openPdf: el<HTMLButtonElement>('open-pdf'),
   page: el<HTMLDivElement>('page'),
   overlay: el<HTMLDivElement>('overlay'),
 };
@@ -186,6 +188,8 @@ document.addEventListener('click', (e) => {
 
 // --- The PDF ---
 
+ui.openPdf.addEventListener('click', () => ui.pdfFile.click());
+
 ui.pdfFile.addEventListener('change', async () => {
   const file = ui.pdfFile.files?.[0];
   if (!file) return;
@@ -201,6 +205,9 @@ ui.pdfFile.addEventListener('change', async () => {
     state.activeCue = -1;
     state.markedCue = -1;
     ui.makeSubs.disabled = false;
+    ui.empty.hidden = true;
+    ui.page.hidden = false;
+    if (state.clock) showPlayerStatus(state.clock);
     say(pdfLoadedText(state.pdf.numPages));
     await showPage(0);
     const saved = await getSrt(bookKey(file));
@@ -457,8 +464,14 @@ function markCueInList(i: number): void {
 
 function showPlayerStatus(s: ClockState): void {
   ui.play.disabled = s.error === 'no_overlay' || (!isAndroid && s.error === 'no_player');
-  ui.play.textContent = s.playing ? '⏸' : '▶';
-  showPlayer(playerMessage(s, isAndroid));
+  ui.play.classList.toggle('playing', s.playing);
+  const action = s.playing ? 'Pause' : 'Play';
+  if (ui.play.title !== action) {
+    ui.play.title = action;
+    ui.play.setAttribute('aria-label', action);
+  }
+  // Before a PDF is open, the start card tells what to do first.
+  showPlayer(state.pdf ? playerMessage(s, isAndroid) : null);
 }
 
 /** The cue at the position of a clock state, or -1. */
@@ -516,12 +529,22 @@ ui.audioFile.addEventListener('change', () => {
 
 // --- Page view ---
 
+/** Shows the page label, and enables the arrows that lead to a page. */
+function updateNav(): void {
+  const pdf = state.pdf;
+  const page = state.currentPage;
+  ui.pageLabel.disabled = !pdf;
+  ui.pageLabel.textContent = pdf ? `${page + 1} / ${pdf.numPages}` : 'No PDF';
+  ui.pageLeft.disabled = !pdf || page <= 0;
+  ui.pageRight.disabled = !pdf || page >= pdf.numPages - 1;
+}
+
 async function showPage(index: number): Promise<void> {
   const pdf = state.pdf;
   if (!pdf || index < 0 || index >= pdf.numPages) return;
   const seq = ++state.renderSeq;
   state.currentPage = index;
-  ui.pageLabel.textContent = `${index + 1} / ${pdf.numPages}`;
+  updateNav();
   // Render at device resolution, up to the OCR width, so zoom stays sharp.
   const dpr = window.devicePixelRatio || 1;
   const width = Math.round(Math.min(OCR_WIDTH, Math.max(300, ui.viewer.clientWidth - 16) * dpr));
@@ -551,8 +574,8 @@ function drawBoxes(): void {
   }
 }
 
-ui.prev.addEventListener('click', () => void showPage(state.currentPage - 1));
-ui.next.addEventListener('click', () => void showPage(state.currentPage + 1));
+ui.pageLeft.addEventListener('click', () => void showPage(state.currentPage - 1));
+ui.pageRight.addEventListener('click', () => void showPage(state.currentPage + 1));
 
 // --- Tap on a word ---
 
