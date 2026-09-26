@@ -217,16 +217,6 @@ body.menu-open #panel {
   max-width: 100%;
 }
 
-#topbar button {
-  white-space: nowrap;
-  font-size: 0.85rem;
-  padding: 0.25rem 0.45rem;
-}
-
-#play {
-  min-width: 2.5rem;
-}
-
 .row {
   display: flex;
   flex-wrap: wrap;
