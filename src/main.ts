@@ -23,9 +23,9 @@ import {
   readingText,
 } from './messages';
 import { setupNav } from './nav';
-import { createOcr, type Ocr } from './ocr';
+import type { Ocr } from './ocr';
 import { defaultRtl } from './paging';
-import { loadPdf, type PdfDoc } from './pdf';
+import type { PdfDoc } from './pdf';
 import { nextPage } from './read-order';
 import { scrollTarget } from './scroll';
 import { say, showPlayer, showReading } from './status';
@@ -219,6 +219,8 @@ ui.pdfFile.addEventListener('change', async () => {
   try {
     state.readSeq++;
     await state.pdf?.destroy();
+    // pdf.js loads with the first PDF, so the start card shows sooner.
+    const { loadPdf } = await import('./pdf');
     state.pdf = await loadPdf(await file.arrayBuffer());
     state.file = file;
     state.pages = [];
@@ -293,14 +295,16 @@ async function readBook(): Promise<void> {
   const read = (): number => counts.text + counts.ocr;
   /** The page that is read now. */
   let page = -1;
-  // The OCR worker starts on the first page that needs it.
+  const onOcrProgress = (p: number): void => {
+    if (seq === state.readSeq) {
+      showReading(readingText(read(), total, `page ${page + 1}: OCR ${Math.round(p * 100)}%`));
+    }
+  };
+  // The OCR worker, and tesseract.js itself, load on the first page that needs them.
   const ocr: { started?: Promise<Ocr> } = {};
   const getOcr = (): Promise<Ocr> => {
-    ocr.started ??= createOcr(ui.lang.value, (p) => {
-      if (seq === state.readSeq) {
-        showReading(readingText(read(), total, `page ${page + 1}: OCR ${Math.round(p * 100)}%`));
-      }
-    });
+    const lang = ui.lang.value;
+    ocr.started ??= import('./ocr').then(({ createOcr }) => createOcr(lang, onOcrProgress));
     return ocr.started;
   };
   try {
