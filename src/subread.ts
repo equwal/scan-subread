@@ -39,7 +39,12 @@ export interface SubReadPlugin {
    * a screen wake lock where the browser has one; errors are ignored.
    */
   keepAwake(options: { on: boolean }): Promise<void>;
-  /** Opens the dictionary with the text. Resolves when the dictionary closes. */
+  /**
+   * Opens the dictionary with the text. Resolves when the dictionary closes.
+   * A dictionary that opens in its own task answers at once, so for such an
+   * answer the call waits until the user is back in the reader, or 1.5 s
+   * when the dictionary did not open.
+   */
   lookup(options: { text: string }): Promise<{ closed: boolean }>;
   dictionaries(): Promise<{ apps: DictionaryApp[]; chosen: string }>;
   /** An empty component means: ask each time. */

@@ -75,6 +75,19 @@ public class SubReadPlugin extends Plugin {
     /** The authority that answered last. It is tried first. */
     private String authority;
 
+    /** Tells when the dictionary is closed. */
+    private final ReturnWatch returns = new ReturnWatch();
+
+    @Override
+    protected void handleOnPause() {
+        returns.paused();
+    }
+
+    @Override
+    protected void handleOnResume() {
+        returns.resumed();
+    }
+
     // --- The player, through SubRead Overlay ---
 
     private List<String> candidates() {
@@ -206,6 +219,7 @@ public class SubReadPlugin extends Plugin {
         ComponentName component = chosen.isEmpty() ? null : ComponentName.unflattenFromString(chosen);
         if (component != null) {
             try {
+                returns.launched();
                 startActivityForResult(call, new Intent(send).setComponent(component), "lookupResult");
                 return;
             } catch (ActivityNotFoundException e) {
@@ -213,16 +227,23 @@ public class SubReadPlugin extends Plugin {
                 prefs().edit().remove(PREF_DICTIONARY).apply();
             }
         }
+        returns.launched();
         startActivityForResult(call, Intent.createChooser(send, null), "lookupResult");
     }
 
-    /** The dictionary closed: the lookup is over. */
+    /**
+     * The dictionary gave its result. The lookup is over when the dictionary
+     * is closed. A dictionary in a new task gives its result at once, so the
+     * watch can hold the call until the user is back.
+     */
     @ActivityCallback
     private void lookupResult(PluginCall call, ActivityResult result) {
         if (call == null) return;
-        JSObject ret = new JSObject();
-        ret.put("closed", true);
-        call.resolve(ret);
+        returns.result(() -> {
+            JSObject ret = new JSObject();
+            ret.put("closed", true);
+            call.resolve(ret);
+        });
     }
 
     @PluginMethod
