@@ -103,6 +103,13 @@ export interface SubReadPlugin {
    * On the web: all false, null and 0.
    */
   suite(): Promise<SuiteApps>;
+  /**
+   * Opens SubRead Overlay (the release build, else the debug build), so that
+   * the user can give it notification access. Without SubRead Overlay, opens
+   * the notification access settings of Android. Resolves which one opened.
+   * On the web: rejects with Error('Android only.').
+   */
+  openOverlay(): Promise<{ opened: 'overlay' | 'settings' }>;
   makeSubtitles(options: {
     audio: string;
     bookText: string;
@@ -169,6 +176,9 @@ class SubReadWeb implements SubReadPlugin {
       anki: false,
       dictionaries: 0,
     });
+  }
+  openOverlay(): Promise<{ opened: 'overlay' | 'settings' }> {
+    return Promise.reject(new Error('Android only.'));
   }
   makeSubtitles(): Promise<SubtitlesResult> {
     return Promise.resolve({ error: 'not_installed' });

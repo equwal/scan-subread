@@ -15,6 +15,7 @@ import android.database.Cursor;
 import android.net.Uri;
 import android.os.Bundle;
 import android.provider.OpenableColumns;
+import android.provider.Settings;
 import android.view.WindowManager;
 import androidx.activity.result.ActivityResult;
 import androidx.core.content.FileProvider;
@@ -48,7 +49,9 @@ import java.util.List;
  *   (`space.subread.app.action.ALIGN`).
  * - SubRead Anki, through `space.subread.anki.action.ADD`: a card for a
  *   word and its sentence.
- * - The package manager: which apps of the suite are installed.
+ * - The package manager: which apps of the suite are installed. SubRead
+ *   Overlay opens from the reader, so that the user can give it
+ *   notification access.
  * - The screen, which stays on during read-along.
  */
 @CapacitorPlugin(name = "SubRead")
@@ -372,6 +375,32 @@ public class SubReadPlugin extends Plugin {
         ret.put("subread", version);
         ret.put("anki", packageInfo(ANKI_PACKAGE) != null);
         ret.put("dictionaries", dictionaries);
+        call.resolve(ret);
+    }
+
+    /**
+     * Opens SubRead Overlay, so that the user can give it notification
+     * access. Without SubRead Overlay, opens the notification access
+     * settings of Android.
+     */
+    @PluginMethod
+    public void openOverlay(PluginCall call) {
+        PackageManager pm = getContext().getPackageManager();
+        Intent open = pm.getLaunchIntentForPackage(OVERLAY_PACKAGE);
+        if (open == null) open = pm.getLaunchIntentForPackage(OVERLAY_DEBUG_PACKAGE);
+        String opened = "overlay";
+        if (open == null) {
+            open = new Intent(Settings.ACTION_NOTIFICATION_LISTENER_SETTINGS);
+            opened = "settings";
+        }
+        try {
+            getActivity().startActivity(open);
+        } catch (ActivityNotFoundException e) {
+            call.reject("Cannot open the " + opened + ".", e);
+            return;
+        }
+        JSObject ret = new JSObject();
+        ret.put("opened", opened);
         call.resolve(ret);
     }
 

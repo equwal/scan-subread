@@ -63,6 +63,10 @@ describe('the web fallback of the plugin', () => {
     });
   });
 
+  it('cannot open SubRead Overlay', async () => {
+    await expect(SubRead.openOverlay()).rejects.toThrow('Android only.');
+  });
+
   it('ignores a browser with no wake lock, and a refused request', async () => {
     vi.stubGlobal('navigator', {});
     await expect(SubRead.keepAwake({ on: true })).resolves.toBeUndefined();
