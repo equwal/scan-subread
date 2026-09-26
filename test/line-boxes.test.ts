@@ -96,6 +96,22 @@ describe('lineBoxes', () => {
     expect(lineBoxes(quote, spanOf(3, 5), 0)).toEqual([{ x0: 20, y0: 0, x1: 60, y1: 20 }]);
   });
 
+  it('grows over CJK punctuation that OCR gave a word of its own', () => {
+    // Tesseract jpn on sample-jpn: the 。 at the end of the line is a word.
+    const words = ['吾輩は', '猫である', '。', '名前はまだ無い', '。'];
+    const line: OcrToken[] = [];
+    words.forEach((w, word) => {
+      for (const ch of w) {
+        const x0 = line.length * 10;
+        line.push({ text: ch, page: 0, line: 0, word, bbox: { x0, y0: 0, x1: x0 + 10, y1: 20 } });
+      }
+    });
+    // The span is 名前はまだ無い: the last 。 joins.
+    expect(lineBoxes(line, spanOf(8, 15), 0)).toEqual([{ x0: 80, y0: 0, x1: 160, y1: 20 }]);
+    // The span is 猫である: the 。 after it joins, は before it does not.
+    expect(lineBoxes(line, spanOf(3, 7), 0)).toEqual([{ x0: 30, y0: 0, x1: 80, y1: 20 }]);
+  });
+
   it('pads each box on each side', () => {
     const line = textTokens(['quiet hills,']);
     expect(lineBoxes(line, spanOf(0, 9), 0, 3)).toEqual([{ x0: -3, y0: -3, x1: 123, y1: 23 }]);

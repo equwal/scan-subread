@@ -13,25 +13,24 @@ const OPENING = /^[\p{Ps}\p{Pi}]+$/u;
 
 /**
  * True when the box of a line can grow from the edge token of the span
- * over `next`, the token before it (`back`) or after it. Both must have the
- * same page, line and word id.
+ * over `next`, the token before it (`back`) or after it, on the same line.
  *
- * In a word that is not CJK, all its tokens join: the spaces show where
- * the word ends. Japanese OCR can give one word for a whole line, so in a
- * CJK word only punctuation joins: an opening mark before the span, and
- * another mark after it. A 。 before the span ends the cue before.
+ * After a letter that is not CJK, the tokens of the same word join: a
+ * space, which is no token, gives the next word another word id. CJK has
+ * no spaces, and its OCR words do not show where a word ends: Japanese OCR
+ * can give one word for a whole line, or one for a 。 alone. So after a
+ * CJK character only punctuation joins: an opening mark before the span,
+ * and another mark after it. A 。 before the span ends the cue before.
  */
 function joins(edge: OcrToken, next: OcrToken | undefined, back: boolean): next is OcrToken {
-  if (
-    next === undefined ||
-    edge.word === undefined ||
-    next.page !== edge.page ||
-    next.line !== edge.line ||
-    next.word !== edge.word
-  ) {
-    return false;
+  if (next === undefined || next.page !== edge.page || next.line !== edge.line) return false;
+  if (!isCjk(edge.text)) {
+    return (
+      edge.word !== undefined &&
+      next.word === edge.word &&
+      (!isCjk(next.text) || PUNCTUATION.test(next.text))
+    );
   }
-  if (!isCjk(edge.text)) return !isCjk(next.text) || PUNCTUATION.test(next.text);
   if (back) return OPENING.test(next.text);
   return PUNCTUATION.test(next.text) && !OPENING.test(next.text);
 }
