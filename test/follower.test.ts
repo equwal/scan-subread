@@ -1,6 +1,13 @@
 import fc from 'fast-check';
 import { describe, expect, it } from 'vitest';
-import { follow, LOOKBACK, pageForCue, type FollowInput, type FollowMode } from '../src/follower';
+import {
+  cueMoved,
+  follow,
+  LOOKBACK,
+  pageForCue,
+  type FollowInput,
+  type FollowMode,
+} from '../src/follower';
 
 const pages: (number | null)[] = [0, 0, null, 1, 1, null, null, 2];
 
@@ -30,6 +37,61 @@ describe('pageForCue', () => {
     const far = [0, ...new Array<null>(LOOKBACK + 1).fill(null)];
     expect(pageForCue(far, far.length - 1)).toBeNull();
     expect(pageForCue(far, LOOKBACK)).toBe(0);
+  });
+});
+
+describe('cueMoved', () => {
+  it('is false when the new alignment keeps the page of the cue', () => {
+    expect(cueMoved([0, 1, 1], [0, 1, 1], 2)).toBe(false);
+  });
+
+  it('is false when only other cues change, as when a page is read in the background', () => {
+    expect(cueMoved([0, 1, null, null], [0, 1, 2, 2], 1)).toBe(false);
+  });
+
+  it('is true when the cue becomes matched', () => {
+    expect(cueMoved([], [0, 1, 1], 1)).toBe(true);
+    expect(cueMoved([0, null, 1], [0, 1, 1], 1)).toBe(true);
+  });
+
+  it('is true when the cue moves to another page', () => {
+    expect(cueMoved([0, 1], [0, 2], 1)).toBe(true);
+  });
+
+  it('is true when an unmatched cue borrows another page', () => {
+    expect(cueMoved([0, null], [1, null], 1)).toBe(true);
+  });
+
+  it('is false between cues', () => {
+    expect(cueMoved([0], [1], -1)).toBe(false);
+  });
+
+  it('is true whenever the new alignment changes what the follow does', () => {
+    // Half of the cues are unmatched. The pages are few, so a change often
+    // gives the same page again.
+    const page = fc.option(fc.nat({ max: 3 }), { nil: null, freq: 2 });
+    const step = fc.array(page, { minLength: 1, maxLength: 30 }).chain((before) =>
+      fc.record({
+        before: fc.constant(before),
+        cue: fc.integer({ min: -1, max: before.length - 1 }),
+        // Changes at the cue and in the cues that it can borrow a page from.
+        changes: fc.array(fc.tuple(fc.nat({ max: LOOKBACK + 1 }), page), { maxLength: 3 }),
+        mode: fc.constantFrom<FollowMode>('highlight', 'pages', 'off'),
+        currentPage: fc.nat({ max: 3 }),
+        previousCue: fc.integer({ min: -1, max: 30 }),
+        seeked: fc.boolean(),
+      }),
+    );
+    fc.assert(
+      fc.property(step, ({ before, changes, ...i }) => {
+        const after = [...before];
+        for (const [back, p] of changes) if (i.cue - back >= 0) after[i.cue - back] = p;
+        const old = follow({ ...i, cuePages: before });
+        const now = follow({ ...i, cuePages: after });
+        if (!cueMoved(before, after, i.cue)) expect(now).toEqual(old);
+      }),
+      { numRuns: 1000 },
+    );
   });
 });
 

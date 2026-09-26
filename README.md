@@ -47,7 +47,9 @@ A cue that the alignment did not find in the book has no page. In the
 two follow modes the page then follows the nearest matched cue before it,
 up to five cues back. The same cue does not turn the page twice: you can
 turn pages by hand while a long cue plays, and the page follows again at
-the next cue.
+the next cue. A new alignment after a page is read turns the page only
+when it finds the cue of now for the first time or moves it to another
+page.
 
 ### The top bar
 

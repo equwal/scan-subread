@@ -44,6 +44,24 @@ export function pageForCue(cuePages: readonly (number | null)[], cue: number): n
 }
 
 /**
+ * True when a new alignment moves the cue: its own page changed (for
+ * example, it became matched), or the page that stands for it changed.
+ * Only then must the follow act again after an alignment. Else a page
+ * that the user turned by hand stays.
+ */
+export function cueMoved(
+  before: readonly (number | null)[],
+  after: readonly (number | null)[],
+  cue: number,
+): boolean {
+  if (cue < 0) return false;
+  return (
+    (before[cue] ?? null) !== (after[cue] ?? null) ||
+    pageForCue(before, cue) !== pageForCue(after, cue)
+  );
+}
+
+/**
  * One step of the follow.
  *
  * `off` does nothing. The same cue as before, without a seek, does nothing

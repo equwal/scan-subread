@@ -4,7 +4,7 @@
 import { createAligner, type Aligner, type OcrToken, type TokenSpan } from './align';
 import { bookText } from './book-text';
 import { LocalAudioClock, OverlayClock, type ClockSource, type ClockState } from './clock-source';
-import { follow, type FollowMode } from './follower';
+import { cueMoved, follow, type FollowMode } from './follower';
 import { lookupText, tokenAt } from './hit-test';
 import { lineBoxes } from './line-boxes';
 import { createOcr, type Ocr } from './ocr';
@@ -405,13 +405,18 @@ function scheduleAlign(): void {
 function align(): void {
   state.alignTimer = null;
   if (!state.aligner || state.cues.length === 0 || state.tokens.length === 0) return;
+  const before = state.cuePages;
   state.spans = state.aligner.spans(state.pages.map((p) => p?.tokens));
   state.cuePages = state.spans.map((s) => (s.matched ? state.tokens[s.start]!.page : null));
   const matched = state.cuePages.filter((p) => p !== null).length;
   setStatus(`${matched}/${state.cues.length} cues matched to the page text.`);
   renderCueList();
-  // The cue of now may be matched now. Apply the clock state again.
-  if (state.clock) applyClock({ ...state.clock, seeked: true });
+  // Follow again only when the alignment moved the cue of now, for
+  // example when it became matched. A page read in the background must not
+  // undo a page turn by hand.
+  if (state.clock && cueMoved(before, state.cuePages, clockCue(state.clock))) {
+    applyClock({ ...state.clock, seeked: true });
+  }
 }
 
 // --- Cue list ---
@@ -474,12 +479,16 @@ function showPlayerStatus(s: ClockState): void {
   }
 }
 
+/** The cue at the position of a clock state, or -1. */
+function clockCue(s: ClockState): number {
+  return s.positionMs === null ? -1 : cueIndexAt(state.cues, s.positionMs / 1000);
+}
+
 /** One state of the clock: mark the cue of now and turn the page. */
 function applyClock(s: ClockState): void {
   state.clock = s;
   showPlayerStatus(s);
-  if (s.positionMs === null) return;
-  const cue = cueIndexAt(state.cues, s.positionMs / 1000);
+  const cue = clockCue(s);
   // The last cue stays marked in the silence between two cues.
   if (cue < 0) return;
   const out = follow({
