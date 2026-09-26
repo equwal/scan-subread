@@ -53,6 +53,20 @@ export interface AnkiResult {
   error?: 'not_installed';
 }
 
+/** The apps of the SubRead suite on the device. */
+export interface SuiteApps {
+  /** SubRead Overlay, the release build. */
+  overlay: boolean;
+  /** SubRead Overlay, the debug build. */
+  overlayDebug: boolean;
+  /** The version name of SubRead, for example "0.10.0", or null without SubRead. */
+  subread: string | null;
+  /** SubRead Anki. */
+  anki: boolean;
+  /** The number of apps in the text selection menu (the `dictionaries` list), without this app. */
+  dictionaries: number;
+}
+
 export interface SubReadPlugin {
   playerState(): Promise<StateLine>;
   play(): Promise<StateLine>;
@@ -84,6 +98,11 @@ export interface SubReadPlugin {
    * `{ error: 'not_installed' }`.
    */
   ankiAdd(options: AnkiCard): Promise<AnkiResult>;
+  /**
+   * Tells which apps of the SubRead suite are installed, for a checklist.
+   * On the web: all false, null and 0.
+   */
+  suite(): Promise<SuiteApps>;
   makeSubtitles(options: {
     audio: string;
     bookText: string;
@@ -141,6 +160,15 @@ class SubReadWeb implements SubReadPlugin {
   }
   ankiAdd(): Promise<AnkiResult> {
     return Promise.resolve({ error: 'not_installed' });
+  }
+  suite(): Promise<SuiteApps> {
+    return Promise.resolve({
+      overlay: false,
+      overlayDebug: false,
+      subread: null,
+      anki: false,
+      dictionaries: 0,
+    });
   }
   makeSubtitles(): Promise<SubtitlesResult> {
     return Promise.resolve({ error: 'not_installed' });

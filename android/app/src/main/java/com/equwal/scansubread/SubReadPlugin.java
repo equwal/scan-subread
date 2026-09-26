@@ -8,6 +8,7 @@ import android.content.ContentResolver;
 import android.content.Context;
 import android.content.Intent;
 import android.content.SharedPreferences;
+import android.content.pm.PackageInfo;
 import android.content.pm.PackageManager;
 import android.content.pm.ResolveInfo;
 import android.database.Cursor;
@@ -47,6 +48,7 @@ import java.util.List;
  *   (`space.subread.app.action.ALIGN`).
  * - SubRead Anki, through `space.subread.anki.action.ADD`: a card for a
  *   word and its sentence.
+ * - The package manager: which apps of the suite are installed.
  * - The screen, which stays on during read-along.
  */
 @CapacitorPlugin(name = "SubRead")
@@ -59,6 +61,9 @@ public class SubReadPlugin extends Plugin {
     };
     private static final String COLUMN_STATE = "state";
     private static final String NO_OVERLAY = "error=no_overlay";
+
+    private static final String OVERLAY_PACKAGE = "space.subread.overlay";
+    private static final String OVERLAY_DEBUG_PACKAGE = "space.subread.overlay.debug";
 
     private static final String PREFS = "subread";
     private static final String PREF_DICTIONARY = "dictionary";
@@ -330,6 +335,44 @@ public class SubReadPlugin extends Plugin {
             }
             call.resolve(ret);
         });
+    }
+
+    // --- The suite ---
+
+    /** The package info of an installed app, or null when the app is not installed. */
+    private PackageInfo packageInfo(String name) {
+        try {
+            return getContext().getPackageManager().getPackageInfo(name, 0);
+        } catch (PackageManager.NameNotFoundException e) {
+            return null;
+        }
+    }
+
+    /**
+     * Tells which apps of the suite are installed, for a checklist. The
+     * packages are in the queries of the manifest, else Android hides them.
+     */
+    @PluginMethod
+    public void suite(PluginCall call) {
+        // The version name of SubRead, or null when SubRead is not installed.
+        PackageInfo subread = packageInfo(SUBREAD_PACKAGE);
+        Object version = JSObject.NULL;
+        if (subread != null) version = subread.versionName == null ? "" : subread.versionName;
+        int dictionaries = 0;
+        PackageManager pm = getContext().getPackageManager();
+        for (ResolveInfo info : pm.queryIntentActivities(probe(), PackageManager.MATCH_DEFAULT_ONLY)) {
+            // This app is not a dictionary.
+            if (info.activityInfo != null && !info.activityInfo.packageName.equals(getContext().getPackageName())) {
+                dictionaries++;
+            }
+        }
+        JSObject ret = new JSObject();
+        ret.put("overlay", packageInfo(OVERLAY_PACKAGE) != null);
+        ret.put("overlayDebug", packageInfo(OVERLAY_DEBUG_PACKAGE) != null);
+        ret.put("subread", version);
+        ret.put("anki", packageInfo(ANKI_PACKAGE) != null);
+        ret.put("dictionaries", dictionaries);
+        call.resolve(ret);
     }
 
     // --- The subtitle maker, through the SubRead app ---

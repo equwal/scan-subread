@@ -53,6 +53,16 @@ describe('the web fallback of the plugin', () => {
     });
   });
 
+  it('has no app of the suite', async () => {
+    await expect(SubRead.suite()).resolves.toEqual({
+      overlay: false,
+      overlayDebug: false,
+      subread: null,
+      anki: false,
+      dictionaries: 0,
+    });
+  });
+
   it('ignores a browser with no wake lock, and a refused request', async () => {
     vi.stubGlobal('navigator', {});
     await expect(SubRead.keepAwake({ on: true })).resolves.toBeUndefined();
