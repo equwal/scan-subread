@@ -1,6 +1,6 @@
 import fc from 'fast-check';
 import { describe, expect, it } from 'vitest';
-import { cueIndexAt, parseSubtitles } from '../src/subtitles';
+import { cueIndexAt, decodeSubtitles, parseSubtitles } from '../src/subtitles';
 
 const SRT = `1
 00:00:01,000 --> 00:00:03,500
@@ -47,6 +47,65 @@ describe('parseSubtitles', () => {
   it('parses hours', () => {
     const cues = parseSubtitles('1\n01:02:03,004 --> 01:02:04,000\nx\n');
     expect(cues[0]?.start).toBeCloseTo(3723.004, 6);
+  });
+});
+
+const NEKO = '吾輩は猫である。';
+
+/** NEKO in Shift_JIS. .NET made these bytes with Encoding.GetEncoding(932). */
+const NEKO_SHIFT_JIS = [
+  0x8c, 0xe1, 0x94, 0x79, 0x82, 0xcd, 0x94, 0x4c, 0x82, 0xc5, 0x82, 0xa0, 0x82, 0xe9, 0x81, 0x42,
+];
+
+function utf8(text: string): ArrayBuffer {
+  const bytes = new TextEncoder().encode(text);
+  return bytes.buffer.slice(bytes.byteOffset, bytes.byteOffset + bytes.byteLength);
+}
+
+function utf16(text: string, littleEndian: boolean): ArrayBuffer {
+  const view = new DataView(new ArrayBuffer(text.length * 2));
+  for (let i = 0; i < text.length; i++) view.setUint16(2 * i, text.charCodeAt(i), littleEndian);
+  return view.buffer;
+}
+
+describe('decodeSubtitles', () => {
+  it('decodes UTF-8 without a BOM', () => {
+    expect(decodeSubtitles(utf8(NEKO))).toBe(NEKO);
+  });
+
+  it('decodes UTF-8 with a BOM, and removes the BOM', () => {
+    expect(decodeSubtitles(utf8('﻿' + NEKO))).toBe(NEKO);
+  });
+
+  it('keeps UTF-8 for a file with a UTF-8 BOM and a bad byte', () => {
+    const bytes = new Uint8Array([...new Uint8Array(utf8('﻿' + NEKO)), 0xff]);
+    expect(decodeSubtitles(bytes.buffer)).toBe(NEKO + '�');
+  });
+
+  it('decodes UTF-16 with a BOM, and removes the BOM', () => {
+    expect(decodeSubtitles(utf16('﻿' + NEKO, true))).toBe(NEKO);
+    expect(decodeSubtitles(utf16('﻿' + NEKO, false))).toBe(NEKO);
+  });
+
+  it('decodes Shift_JIS', () => {
+    expect(decodeSubtitles(new Uint8Array(NEKO_SHIFT_JIS).buffer)).toBe(NEKO);
+  });
+
+  it('gives the cues of a Shift_JIS file', () => {
+    const time = new TextEncoder().encode('1\r\n00:00:00,000 --> 00:00:02,500\r\n');
+    const file = new Uint8Array([...time, ...NEKO_SHIFT_JIS, 0x0d, 0x0a]);
+    expect(parseSubtitles(decodeSubtitles(file.buffer))).toEqual([
+      { start: 0, end: 2.5, text: NEKO },
+    ]);
+  });
+
+  it('gives back each text that is encoded as UTF-8', () => {
+    fc.assert(
+      fc.property(fc.string({ unit: 'binary' }), (text) => {
+        // A BOM at the start is not text, so the decoder removes it.
+        expect(decodeSubtitles(utf8(text))).toBe(text.replace(/^﻿/, ''));
+      }),
+    );
   });
 });
 
