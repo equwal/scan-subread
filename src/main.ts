@@ -1,11 +1,12 @@
 // UI wiring. The logic lives in the pure modules: align.ts, follower.ts,
-// hit-test.ts, text-layer.ts, player-state.ts, play-clock.ts.
+// hit-test.ts, line-boxes.ts, text-layer.ts, player-state.ts, play-clock.ts.
 
 import { createAligner, type Aligner, type OcrToken, type TokenSpan } from './align';
 import { bookText } from './book-text';
 import { LocalAudioClock, OverlayClock, type ClockSource, type ClockState } from './clock-source';
 import { follow, type FollowMode } from './follower';
 import { lookupText, tokenAt } from './hit-test';
+import { lineBoxes } from './line-boxes';
 import { createOcr, type Ocr } from './ocr';
 import { loadPdf, type PdfDoc } from './pdf';
 import { isAndroid, SubRead } from './subread';
@@ -256,6 +257,10 @@ async function readBook(): Promise<void> {
   const seq = ++state.readSeq;
   state.pages = [];
   state.tokens = [];
+  // The spans index the old tokens, so they go too.
+  state.spans = [];
+  state.cuePages = [];
+  state.markedCue = -1;
   ui.pagesStatus.textContent = `Pages: 0/${pdf.numPages} read.`;
   const pending = new Set(Array.from({ length: pdf.numPages }, (_, i) => i));
   // The OCR worker starts on the first page that needs it.
@@ -545,21 +550,7 @@ function drawBoxes(): void {
   const span = state.spans[state.markedCue];
   const size = state.pages[state.currentPage];
   if (!span || !size) return;
-
-  const lines = new Map<number, OcrToken['bbox']>();
-  for (let t = span.start; t < span.end; t++) {
-    const token = state.tokens[t]!;
-    if (token.page !== state.currentPage) continue;
-    const box = lines.get(token.line);
-    if (!box) lines.set(token.line, { ...token.bbox });
-    else {
-      box.x0 = Math.min(box.x0, token.bbox.x0);
-      box.y0 = Math.min(box.y0, token.bbox.y0);
-      box.x1 = Math.max(box.x1, token.bbox.x1);
-      box.y1 = Math.max(box.y1, token.bbox.y1);
-    }
-  }
-  for (const box of lines.values()) {
+  for (const box of lineBoxes(state.tokens, span, state.currentPage)) {
     const div = document.createElement('div');
     div.className = 'box';
     div.style.left = `${(100 * box.x0) / size.width}%`;

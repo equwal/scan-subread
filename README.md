@@ -274,6 +274,8 @@ in a browser bundle.
 - `src/subtitles.ts`: pure SRT/VTT parser and active-cue lookup.
 - `src/hit-test.ts`: pure tap on the page. Hit test, scan string, the
   lookup text.
+- `src/line-boxes.ts`: pure boxes that mark a cue, one for each text
+  line of the page.
 - `src/book-text.ts`: pure tokens to the book text for SubRead.
 - `src/subread.ts`: the typed side of the plugin, with the web fallback.
 - `src/token-cache.ts`: IndexedDB store for the page tokens and the
