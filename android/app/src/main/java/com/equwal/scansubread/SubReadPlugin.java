@@ -1,7 +1,6 @@
 package com.equwal.scansubread;
 
 import android.app.Activity;
-import android.content.ActivityNotFoundException;
 import android.content.ClipData;
 import android.content.ComponentName;
 import android.content.ContentResolver;
@@ -112,6 +111,24 @@ public class SubReadPlugin extends Plugin {
     @Override
     protected void handleOnResume() {
         returns.resumed();
+    }
+
+    /**
+     * Starts an activity for a result. Returns null when the activity
+     * started, else the exception of Android: ActivityNotFoundException when
+     * no app takes the intent, SecurityException when this app may not start
+     * it, for example when the read grant of an audio Uri is gone after a
+     * restart. Capacitor gives an exception of a plugin method to its plugin
+     * thread, and the app stops. So each caller ends the call with an error.
+     * No result comes, so the return watch has nothing to end.
+     */
+    private RuntimeException startForResult(PluginCall call, Intent intent, String callback) {
+        try {
+            startActivityForResult(call, intent, callback);
+            return null;
+        } catch (RuntimeException e) {
+            return e;
+        }
     }
 
     // --- The player, through SubRead Overlay ---
@@ -244,17 +261,14 @@ public class SubReadPlugin extends Plugin {
         String chosen = prefs().getString(PREF_DICTIONARY, "");
         ComponentName component = chosen.isEmpty() ? null : ComponentName.unflattenFromString(chosen);
         if (component != null) {
-            try {
-                returns.launched();
-                startActivityForResult(call, new Intent(send).setComponent(component), "lookupResult");
-                return;
-            } catch (ActivityNotFoundException e) {
-                // The chosen app is gone. Ask.
-                prefs().edit().remove(PREF_DICTIONARY).apply();
-            }
+            returns.launched();
+            if (startForResult(call, new Intent(send).setComponent(component), "lookupResult") == null) return;
+            // The chosen app is gone, or it does not let this app start it. Ask.
+            prefs().edit().remove(PREF_DICTIONARY).apply();
         }
         returns.launched();
-        startActivityForResult(call, Intent.createChooser(send, null), "lookupResult");
+        RuntimeException failed = startForResult(call, Intent.createChooser(send, null), "lookupResult");
+        if (failed != null) call.reject("Cannot open the dictionary: " + failed.getMessage(), failed);
     }
 
     /**
@@ -327,7 +341,7 @@ public class SubReadPlugin extends Plugin {
             return;
         }
         returns.launched();
-        startActivityForResult(call, add, "ankiResult");
+        if (startForResult(call, add, "ankiResult") != null) call.resolve(errorObject("cannot_start"));
     }
 
     /** SubRead Anki gave its result: the note is in Anki, or the user closed the card. */
@@ -401,7 +415,8 @@ public class SubReadPlugin extends Plugin {
         }
         try {
             getActivity().startActivity(open);
-        } catch (ActivityNotFoundException e) {
+        } catch (RuntimeException e) {
+            // ActivityNotFoundException or SecurityException: see startForResult.
             call.reject("Cannot open the " + opened + ".", e);
             return;
         }
@@ -528,7 +543,12 @@ public class SubReadPlugin extends Plugin {
             // only the result file gets write access.
             getContext().grantUriPermission(SUBREAD_PACKAGE, resultUri, Intent.FLAG_GRANT_WRITE_URI_PERMISSION);
         }
-        startActivityForResult(call, ask, "subtitlesResult");
+        RuntimeException failed = startForResult(call, ask, "subtitlesResult");
+        if (failed != null) {
+            // SubRead did not start, so it needs no write access.
+            if (resultUri != null) getContext().revokeUriPermission(resultUri, Intent.FLAG_GRANT_WRITE_URI_PERMISSION);
+            call.resolve(errorObject("cannot_start: " + failed.getMessage()));
+        }
     }
 
     /**
@@ -614,7 +634,8 @@ public class SubReadPlugin extends Plugin {
         intent.addCategory(Intent.CATEGORY_OPENABLE);
         intent.setType("audio/*");
         intent.addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION | Intent.FLAG_GRANT_PERSISTABLE_URI_PERMISSION);
-        startActivityForResult(call, intent, "audioResult");
+        RuntimeException failed = startForResult(call, intent, "audioResult");
+        if (failed != null) call.reject("Cannot open the file chooser: " + failed.getMessage(), failed);
     }
 
     @ActivityCallback

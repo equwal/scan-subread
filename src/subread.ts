@@ -24,7 +24,10 @@ export interface SubtitlesResult {
   /** 0 to 1: the share of lines whose words were found in the book. */
   matchRate?: number;
   language?: string | null;
-  /** `not_installed`, `cancelled`, or the reason SubRead gave. */
+  /**
+   * `not_installed`, `cancelled`, `cannot_start: <reason>` when Android
+   * cannot start SubRead, or the reason SubRead gave.
+   */
   error?: string;
 }
 
@@ -49,8 +52,8 @@ export interface AnkiResult {
   added?: boolean;
   /** The id of the new note in Anki, when `added` is true. */
   noteId?: number;
-  /** SubRead Anki is not on the device. */
-  error?: 'not_installed';
+  /** SubRead Anki is not on the device, or Android cannot start it. */
+  error?: 'not_installed' | 'cannot_start';
 }
 
 /** The apps of the SubRead suite on the device. */
@@ -82,7 +85,8 @@ export interface SubReadPlugin {
    * Opens the dictionary with the text. Resolves when the dictionary closes.
    * A dictionary that opens in its own task answers at once, so for such an
    * answer the call waits until the user is back in the reader, or 1.5 s
-   * when the dictionary did not open.
+   * when the dictionary did not open. Rejects when Android cannot open the
+   * dictionary or the chooser.
    */
   lookup(options: { text: string }): Promise<{ closed: boolean }>;
   dictionaries(): Promise<{ apps: DictionaryApp[]; chosen: string }>;
@@ -93,9 +97,10 @@ export interface SubReadPlugin {
    * fields that are given and not empty go to SubRead Anki; without `word`
    * and `text` the call rejects. Resolves when SubRead Anki closes, the same
    * as `lookup`: `{ added: true, noteId }` when the note is in Anki,
-   * `{ added: false }` when the user closed the card, and
-   * `{ error: 'not_installed' }` without SubRead Anki. On the web:
-   * `{ error: 'not_installed' }`.
+   * `{ added: false }` when the user closed the card,
+   * `{ error: 'not_installed' }` without SubRead Anki, and
+   * `{ error: 'cannot_start' }` when Android cannot start SubRead Anki. On
+   * the web: `{ error: 'not_installed' }`.
    */
   ankiAdd(options: AnkiCard): Promise<AnkiResult>;
   /**
@@ -107,7 +112,8 @@ export interface SubReadPlugin {
    * Opens SubRead Overlay (the release build, else the debug build), so that
    * the user can give it notification access. Without SubRead Overlay, opens
    * the notification access settings of Android. Resolves which one opened.
-   * On the web: rejects with Error('Android only.').
+   * Rejects when Android cannot open it. On the web: rejects with
+   * Error('Android only.').
    */
   openOverlay(): Promise<{ opened: 'overlay' | 'settings' }>;
   /**
@@ -138,7 +144,9 @@ export interface SubReadPlugin {
    * one of the two copies. On the web: `{}`.
    */
   pendingSubtitles(options: { resultName: string }): Promise<{ srt?: string }>;
+  /** Rejects when the user picks no file, or when Android cannot open the file chooser. */
   pickAudio(): Promise<{ uri: string; name: string }>;
+  /** Rejects when Android cannot open the share sheet. */
   shareText(options: { name: string; text: string }): Promise<void>;
 }
 
