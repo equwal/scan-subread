@@ -8,12 +8,15 @@ import android.content.ContentResolver;
 import android.content.Context;
 import android.content.Intent;
 import android.content.SharedPreferences;
+import android.content.pm.PackageInfo;
 import android.content.pm.PackageManager;
 import android.content.pm.ResolveInfo;
 import android.database.Cursor;
 import android.net.Uri;
 import android.os.Bundle;
 import android.provider.OpenableColumns;
+import android.provider.Settings;
+import android.view.WindowManager;
 import androidx.activity.result.ActivityResult;
 import androidx.core.content.FileProvider;
 import com.getcapacitor.JSArray;
@@ -25,6 +28,7 @@ import com.getcapacitor.annotation.ActivityCallback;
 import com.getcapacitor.annotation.CapacitorPlugin;
 import java.io.ByteArrayOutputStream;
 import java.io.File;
+import java.io.FileInputStream;
 import java.io.FileOutputStream;
 import java.io.IOException;
 import java.io.InputStream;
@@ -43,7 +47,14 @@ import java.util.List;
  *   Dictionary, Takoboto, AnkiDroid and other apps in the text selection
  *   menu. The lookup resolves when the dictionary closes.
  * - The subtitle maker, through the intent API of the SubRead app
- *   (`space.subread.app.action.ALIGN`).
+ *   (`space.subread.app.action.ALIGN`). SubRead 0.10.0 and later also
+ *   write the .srt into a result file of this app.
+ * - SubRead Anki, through `space.subread.anki.action.ADD`: a card for a
+ *   word and its sentence.
+ * - The package manager: which apps of the suite are installed. SubRead
+ *   Overlay opens from the reader, so that the user can give it
+ *   notification access.
+ * - The screen, which stays on during read-along.
  */
 @CapacitorPlugin(name = "SubRead")
 public class SubReadPlugin extends Plugin {
@@ -56,6 +67,9 @@ public class SubReadPlugin extends Plugin {
     private static final String COLUMN_STATE = "state";
     private static final String NO_OVERLAY = "error=no_overlay";
 
+    private static final String OVERLAY_PACKAGE = "space.subread.overlay";
+    private static final String OVERLAY_DEBUG_PACKAGE = "space.subread.overlay.debug";
+
     private static final String PREFS = "subread";
     private static final String PREF_DICTIONARY = "dictionary";
 
@@ -67,11 +81,38 @@ public class SubReadPlugin extends Plugin {
     private static final String EXTRA_CUES = "space.subread.extra.CUES";
     private static final String EXTRA_MATCH_RATE = "space.subread.extra.MATCH_RATE";
     private static final String EXTRA_ERROR = "space.subread.extra.ERROR";
+    private static final String EXTRA_RESULT = "space.subread.extra.RESULT";
 
     private static final String SHARE_DIR = "share";
 
+    /** The folder in filesDir for the result files of SubRead. See file_paths.xml. */
+    private static final String RESULT_DIR = "subread";
+
+    private static final String ANKI_PACKAGE = "space.subread.anki";
+    private static final String ACTION_ANKI_ADD = "space.subread.anki.action.ADD";
+    private static final String EXTRA_ANKI_WORD = "space.subread.anki.extra.WORD";
+    private static final String EXTRA_ANKI_READING = "space.subread.anki.extra.READING";
+    private static final String EXTRA_ANKI_SENTENCE = "space.subread.anki.extra.SENTENCE";
+    private static final String EXTRA_ANKI_TEXT = "space.subread.anki.extra.TEXT";
+    private static final String EXTRA_ANKI_SOURCE = "space.subread.anki.extra.SOURCE";
+    private static final String EXTRA_ANKI_SHOW = "space.subread.anki.extra.SHOW";
+    private static final String EXTRA_ANKI_NOTE_ID = "space.subread.anki.extra.NOTE_ID";
+
     /** The authority that answered last. It is tried first. */
     private String authority;
+
+    /** Tells when the dictionary or SubRead Anki is closed. */
+    private final ReturnWatch returns = new ReturnWatch();
+
+    @Override
+    protected void handleOnPause() {
+        returns.paused();
+    }
+
+    @Override
+    protected void handleOnResume() {
+        returns.resumed();
+    }
 
     // --- The player, through SubRead Overlay ---
 
@@ -154,6 +195,31 @@ public class SubReadPlugin extends Plugin {
         call.resolve(lineObject(callPlayer("seek", String.valueOf(Math.max(0, ms)))));
     }
 
+    // --- The screen ---
+
+    /**
+     * Keeps the screen on, or lets it turn off again. During read-along the
+     * user does not touch the screen, so without this the screen turns off.
+     */
+    @PluginMethod
+    public void keepAwake(PluginCall call) {
+        Boolean on = call.getBoolean("on");
+        if (on == null) {
+            call.reject("on is required.");
+            return;
+        }
+        // Only the UI thread can change the flags of the window.
+        getActivity()
+            .runOnUiThread(() -> {
+                if (on) {
+                    getActivity().getWindow().addFlags(WindowManager.LayoutParams.FLAG_KEEP_SCREEN_ON);
+                } else {
+                    getActivity().getWindow().clearFlags(WindowManager.LayoutParams.FLAG_KEEP_SCREEN_ON);
+                }
+                call.resolve();
+            });
+    }
+
     // --- The dictionary, through ACTION_PROCESS_TEXT ---
 
     private SharedPreferences prefs() {
@@ -179,6 +245,7 @@ public class SubReadPlugin extends Plugin {
         ComponentName component = chosen.isEmpty() ? null : ComponentName.unflattenFromString(chosen);
         if (component != null) {
             try {
+                returns.launched();
                 startActivityForResult(call, new Intent(send).setComponent(component), "lookupResult");
                 return;
             } catch (ActivityNotFoundException e) {
@@ -186,16 +253,23 @@ public class SubReadPlugin extends Plugin {
                 prefs().edit().remove(PREF_DICTIONARY).apply();
             }
         }
+        returns.launched();
         startActivityForResult(call, Intent.createChooser(send, null), "lookupResult");
     }
 
-    /** The dictionary closed: the lookup is over. */
+    /**
+     * The dictionary gave its result. The lookup is over when the dictionary
+     * is closed. A dictionary in a new task gives its result at once, so the
+     * watch can hold the call until the user is back.
+     */
     @ActivityCallback
     private void lookupResult(PluginCall call, ActivityResult result) {
         if (call == null) return;
-        JSObject ret = new JSObject();
-        ret.put("closed", true);
-        call.resolve(ret);
+        returns.result(() -> {
+            JSObject ret = new JSObject();
+            ret.put("closed", true);
+            call.resolve(ret);
+        });
     }
 
     @PluginMethod
@@ -225,6 +299,117 @@ public class SubReadPlugin extends Plugin {
         call.resolve();
     }
 
+    // --- The card maker, through SubRead Anki ---
+
+    /** Puts the text option `name` in the extra `extra`, when the caller gave it. */
+    private static void putText(Intent intent, PluginCall call, String name, String extra) {
+        String value = call.getString(name);
+        if (value != null && !value.isEmpty()) intent.putExtra(extra, value);
+    }
+
+    /** Asks SubRead Anki to make a card. SubRead Anki needs a word or a text. */
+    @PluginMethod
+    public void ankiAdd(PluginCall call) {
+        Intent add = new Intent(ACTION_ANKI_ADD).setPackage(ANKI_PACKAGE);
+        putText(add, call, "word", EXTRA_ANKI_WORD);
+        putText(add, call, "reading", EXTRA_ANKI_READING);
+        putText(add, call, "sentence", EXTRA_ANKI_SENTENCE);
+        putText(add, call, "text", EXTRA_ANKI_TEXT);
+        putText(add, call, "source", EXTRA_ANKI_SOURCE);
+        if (!add.hasExtra(EXTRA_ANKI_WORD) && !add.hasExtra(EXTRA_ANKI_TEXT)) {
+            call.reject("word or text is required.");
+            return;
+        }
+        Boolean show = call.getBoolean("show");
+        if (show != null) add.putExtra(EXTRA_ANKI_SHOW, show.booleanValue());
+        if (add.resolveActivity(getContext().getPackageManager()) == null) {
+            call.resolve(errorObject("not_installed"));
+            return;
+        }
+        returns.launched();
+        startActivityForResult(call, add, "ankiResult");
+    }
+
+    /** SubRead Anki gave its result: the note is in Anki, or the user closed the card. */
+    @ActivityCallback
+    private void ankiResult(PluginCall call, ActivityResult result) {
+        if (call == null) return;
+        returns.result(() -> {
+            JSObject ret = new JSObject();
+            Intent data = result.getData();
+            boolean added = result.getResultCode() == Activity.RESULT_OK;
+            ret.put("added", added);
+            if (added && data != null && data.hasExtra(EXTRA_ANKI_NOTE_ID)) {
+                ret.put("noteId", data.getLongExtra(EXTRA_ANKI_NOTE_ID, 0));
+            }
+            call.resolve(ret);
+        });
+    }
+
+    // --- The suite ---
+
+    /** The package info of an installed app, or null when the app is not installed. */
+    private PackageInfo packageInfo(String name) {
+        try {
+            return getContext().getPackageManager().getPackageInfo(name, 0);
+        } catch (PackageManager.NameNotFoundException e) {
+            return null;
+        }
+    }
+
+    /**
+     * Tells which apps of the suite are installed, for a checklist. The
+     * packages are in the queries of the manifest, else Android hides them.
+     */
+    @PluginMethod
+    public void suite(PluginCall call) {
+        // The version name of SubRead, or null when SubRead is not installed.
+        PackageInfo subread = packageInfo(SUBREAD_PACKAGE);
+        Object version = JSObject.NULL;
+        if (subread != null) version = subread.versionName == null ? "" : subread.versionName;
+        int dictionaries = 0;
+        PackageManager pm = getContext().getPackageManager();
+        for (ResolveInfo info : pm.queryIntentActivities(probe(), PackageManager.MATCH_DEFAULT_ONLY)) {
+            // This app is not a dictionary.
+            if (info.activityInfo != null && !info.activityInfo.packageName.equals(getContext().getPackageName())) {
+                dictionaries++;
+            }
+        }
+        JSObject ret = new JSObject();
+        ret.put("overlay", packageInfo(OVERLAY_PACKAGE) != null);
+        ret.put("overlayDebug", packageInfo(OVERLAY_DEBUG_PACKAGE) != null);
+        ret.put("subread", version);
+        ret.put("anki", packageInfo(ANKI_PACKAGE) != null);
+        ret.put("dictionaries", dictionaries);
+        call.resolve(ret);
+    }
+
+    /**
+     * Opens SubRead Overlay, so that the user can give it notification
+     * access. Without SubRead Overlay, opens the notification access
+     * settings of Android.
+     */
+    @PluginMethod
+    public void openOverlay(PluginCall call) {
+        PackageManager pm = getContext().getPackageManager();
+        Intent open = pm.getLaunchIntentForPackage(OVERLAY_PACKAGE);
+        if (open == null) open = pm.getLaunchIntentForPackage(OVERLAY_DEBUG_PACKAGE);
+        String opened = "overlay";
+        if (open == null) {
+            open = new Intent(Settings.ACTION_NOTIFICATION_LISTENER_SETTINGS);
+            opened = "settings";
+        }
+        try {
+            getActivity().startActivity(open);
+        } catch (ActivityNotFoundException e) {
+            call.reject("Cannot open the " + opened + ".", e);
+            return;
+        }
+        JSObject ret = new JSObject();
+        ret.put("opened", opened);
+        call.resolve(ret);
+    }
+
     // --- The subtitle maker, through the SubRead app ---
 
     /** Writes `text` to cacheDir/share/<name> and returns its FileProvider Uri. */
@@ -244,13 +429,52 @@ public class SubReadPlugin extends Plugin {
         return ret;
     }
 
+    /**
+     * A safe file name: the name keeps A-Z, a-z, 0-9, ".", "_" and "-", and
+     * each other character becomes "_". So the name cannot point to another
+     * folder. Null when no file can have the name.
+     */
+    static String safeFileName(String name) {
+        String safe = name.replaceAll("[^A-Za-z0-9._-]", "_");
+        if (safe.isEmpty() || safe.equals(".") || safe.equals("..") || safe.length() > 255) return null;
+        return safe;
+    }
+
+    /** The result file for `resultName`: filesDir/subread/<safe name>, or null. */
+    private File resultFile(String resultName) {
+        String name = safeFileName(resultName);
+        return name == null ? null : new File(new File(getContext().getFilesDir(), RESULT_DIR), name);
+    }
+
+    /**
+     * Makes the folder of a result file and removes the result of an earlier
+     * job, so that pendingSubtitles gives only the result of the new job.
+     * Returns the FileProvider Uri of the file.
+     */
+    private Uri clearResult(File file) throws IOException {
+        File dir = file.getParentFile();
+        if (dir != null && !dir.isDirectory() && !dir.mkdirs()) throw new IOException("Cannot create " + dir);
+        if (file.exists() && !file.delete()) throw new IOException("Cannot remove " + file);
+        return FileProvider.getUriForFile(getContext(), getContext().getPackageName() + ".fileprovider", file);
+    }
+
+    /**
+     * Asks SubRead for the .srt of the audio and the book text. The optional
+     * `resultName` names a result file, see pendingSubtitles.
+     */
     @PluginMethod
     public void makeSubtitles(PluginCall call) {
         String audio = call.getString("audio");
         String bookText = call.getString("bookText");
         String language = call.getString("language", "auto");
+        String resultName = call.getString("resultName");
         if (audio == null || bookText == null) {
             call.reject("audio and bookText are required.");
+            return;
+        }
+        File result = resultName == null ? null : resultFile(resultName);
+        if (resultName != null && result == null) {
+            call.reject("resultName is not a usable file name.");
             return;
         }
         Uri bookUri;
@@ -260,6 +484,20 @@ public class SubReadPlugin extends Plugin {
             call.reject("Cannot write the book text: " + e.getMessage(), e);
             return;
         }
+        Uri resultUri = null;
+        if (result != null) {
+            try {
+                resultUri = clearResult(result);
+            } catch (IOException e) {
+                call.reject("Cannot make the result file: " + e.getMessage(), e);
+                return;
+            }
+        }
+        // While SubRead runs, Capacitor keeps the options of this call two
+        // times in the saved state of the activity. That state has a limit of
+        // about 1 MB. With a large book text, the reader crashes when SubRead
+        // covers it. SubRead reads the book text from the file, so remove it.
+        call.getData().remove("bookText");
         Uri audioUri = Uri.parse(audio);
         Intent ask = new Intent(ACTION_ALIGN)
             .setPackage(SUBREAD_PACKAGE)
@@ -269,13 +507,63 @@ public class SubReadPlugin extends Plugin {
         // SubRead must be able to read both files.
         ClipData clip = ClipData.newRawUri("audio", audioUri);
         clip.addItem(new ClipData.Item(bookUri));
+        if (resultUri != null) {
+            // SubRead 0.10.0 and later write the .srt into this file before
+            // they answer, so the .srt is safe when Android stops the reader
+            // during the job. Older versions ignore the extra.
+            ask.putExtra(EXTRA_RESULT, resultUri);
+            clip.addItem(new ClipData.Item(resultUri));
+        }
         ask.setClipData(clip);
         ask.addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION);
         if (ask.resolveActivity(getContext().getPackageManager()) == null) {
             call.resolve(errorObject("not_installed"));
             return;
         }
+        if (resultUri != null) {
+            // SubRead must be able to write the result file. The intent flag
+            // FLAG_GRANT_WRITE_URI_PERMISSION asks for write access to each
+            // file of the clip, the audio file too. This app can only read the
+            // audio file, so startActivity would throw SecurityException. So
+            // only the result file gets write access.
+            getContext().grantUriPermission(SUBREAD_PACKAGE, resultUri, Intent.FLAG_GRANT_WRITE_URI_PERMISSION);
+        }
         startActivityForResult(call, ask, "subtitlesResult");
+    }
+
+    /**
+     * Gives the .srt that SubRead wrote into the result file `resultName`,
+     * and removes the file. SubRead can finish while Android has stopped the
+     * reader. Then the activity result is lost, but the file is there.
+     * Resolves no srt when the file is not there or is empty.
+     */
+    @PluginMethod
+    public void pendingSubtitles(PluginCall call) {
+        String resultName = call.getString("resultName");
+        if (resultName == null) {
+            call.reject("resultName is required.");
+            return;
+        }
+        File file = resultFile(resultName);
+        if (file == null) {
+            call.reject("resultName is not a usable file name.");
+            return;
+        }
+        JSObject ret = new JSObject();
+        if (file.isFile() && file.length() > 0) {
+            try (InputStream in = new FileInputStream(file)) {
+                ret.put("srt", readAll(in));
+            } catch (IOException e) {
+                call.reject("Cannot read the result file: " + e.getMessage(), e);
+                return;
+            }
+            // The job is done, so SubRead needs no more write access.
+            Uri uri = FileProvider.getUriForFile(getContext(), getContext().getPackageName() + ".fileprovider", file);
+            getContext().revokeUriPermission(uri, Intent.FLAG_GRANT_WRITE_URI_PERMISSION);
+            // When the delete fails, the next call gives the same .srt again.
+            file.delete();
+        }
+        call.resolve(ret);
     }
 
     private static String readAll(InputStream in) throws IOException {

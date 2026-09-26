@@ -4,4 +4,6 @@
     <cache-path name="my_cache_images" path="." />
     <!-- The book text for SubRead and the finished .srt for the share sheet. -->
     <cache-path name="share" path="share/" />
+    <!-- The result files that SubRead writes the .srt into. -->
+    <files-path name="subread" path="subread/" />
 </paths>

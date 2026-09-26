@@ -42,6 +42,7 @@
         <package android:name="space.subread.overlay" />
         <package android:name="space.subread.overlay.debug" />
         <package android:name="space.subread.dictionary" />
+        <package android:name="space.subread.anki" />
         <!-- The player provider of SubRead Overlay: the release build and the debug build. -->
         <provider android:authorities="space.subread.overlay.player;space.subread.overlay.debug.player" />
         <!-- The dictionary apps: each app in the text selection menu. -->

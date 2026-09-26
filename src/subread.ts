@@ -1,7 +1,8 @@
 // The bridge to the SubRead suite: the typed side of SubReadPlugin.java.
 //
 // On the web there is no suite. The fallback reports no overlay, copies a
-// lookup to the clipboard, and cannot make subtitles.
+// lookup to the clipboard, and cannot make subtitles or cards. It keeps the
+// screen on with the Screen Wake Lock API when the browser has it.
 
 import { Capacitor, registerPlugin } from '@capacitor/core';
 
@@ -27,26 +28,124 @@ export interface SubtitlesResult {
   error?: string;
 }
 
+/** A card for SubRead Anki. Give `word` or `text`. */
+export interface AnkiCard {
+  /** The word, in its dictionary form when the caller knows it. */
+  word?: string;
+  /** The reading of the word, in kana. */
+  reading?: string;
+  /** The sentence that holds the word, as plain text: see `sentenceAround`. */
+  sentence?: string;
+  /** A text with no word chosen: the user taps the word on the card. */
+  text?: string;
+  /** Where the sentence is from, for example the title of the book. */
+  source?: string;
+  /** True: show the card before it goes to Anki. */
+  show?: boolean;
+}
+
+export interface AnkiResult {
+  /** True when the note is in Anki. False when the user closed the card. */
+  added?: boolean;
+  /** The id of the new note in Anki, when `added` is true. */
+  noteId?: number;
+  /** SubRead Anki is not on the device. */
+  error?: 'not_installed';
+}
+
+/** The apps of the SubRead suite on the device. */
+export interface SuiteApps {
+  /** SubRead Overlay, the release build. */
+  overlay: boolean;
+  /** SubRead Overlay, the debug build. */
+  overlayDebug: boolean;
+  /** The version name of SubRead, for example "0.10.0", or null without SubRead. */
+  subread: string | null;
+  /** SubRead Anki. */
+  anki: boolean;
+  /** The number of apps in the text selection menu (the `dictionaries` list), without this app. */
+  dictionaries: number;
+}
+
 export interface SubReadPlugin {
   playerState(): Promise<StateLine>;
   play(): Promise<StateLine>;
   pause(): Promise<StateLine>;
   seek(options: { ms: number }): Promise<StateLine>;
-  /** Opens the dictionary with the text. Resolves when the dictionary closes. */
+  /**
+   * Keeps the screen on while `on` is true. During read-along the user does
+   * not touch the screen, so without this the screen turns off. On the web,
+   * a screen wake lock where the browser has one; errors are ignored.
+   */
+  keepAwake(options: { on: boolean }): Promise<void>;
+  /**
+   * Opens the dictionary with the text. Resolves when the dictionary closes.
+   * A dictionary that opens in its own task answers at once, so for such an
+   * answer the call waits until the user is back in the reader, or 1.5 s
+   * when the dictionary did not open.
+   */
   lookup(options: { text: string }): Promise<{ closed: boolean }>;
   dictionaries(): Promise<{ apps: DictionaryApp[]; chosen: string }>;
   /** An empty component means: ask each time. */
   setDictionary(options: { component: string }): Promise<void>;
+  /**
+   * Makes a card in SubRead Anki (`space.subread.anki.action.ADD`). Only the
+   * fields that are given and not empty go to SubRead Anki; without `word`
+   * and `text` the call rejects. Resolves when SubRead Anki closes, the same
+   * as `lookup`: `{ added: true, noteId }` when the note is in Anki,
+   * `{ added: false }` when the user closed the card, and
+   * `{ error: 'not_installed' }` without SubRead Anki. On the web:
+   * `{ error: 'not_installed' }`.
+   */
+  ankiAdd(options: AnkiCard): Promise<AnkiResult>;
+  /**
+   * Tells which apps of the SubRead suite are installed, for a checklist.
+   * On the web: all false, null and 0.
+   */
+  suite(): Promise<SuiteApps>;
+  /**
+   * Opens SubRead Overlay (the release build, else the debug build), so that
+   * the user can give it notification access. Without SubRead Overlay, opens
+   * the notification access settings of Android. Resolves which one opened.
+   * On the web: rejects with Error('Android only.').
+   */
+  openOverlay(): Promise<{ opened: 'overlay' | 'settings' }>;
+  /**
+   * Asks SubRead for the .srt of the audio and the book text
+   * (`space.subread.app.action.ALIGN`), and resolves with the answer of
+   * SubRead.
+   *
+   * `resultName` names a result file for the book, for example a name that
+   * the caller makes from the book key. The plugin keeps A-Z, a-z, 0-9, ".",
+   * "_" and "-" of the name, and changes each other character to "_". The
+   * call removes the result of an earlier job with the same name. SubRead
+   * 0.10.0 and later write the .srt into the file before they answer, so
+   * the .srt is safe when Android stops the reader during the job. Older
+   * versions ignore the file. See `pendingSubtitles`.
+   */
   makeSubtitles(options: {
     audio: string;
     bookText: string;
     language: string;
+    resultName?: string;
   }): Promise<SubtitlesResult>;
+  /**
+   * The .srt that SubRead wrote into the result file `resultName` of
+   * `makeSubtitles`, or `{}` when the file is not there or is empty. The
+   * call removes the file after it reads it. Call it when the book opens,
+   * for a job that ended while the reader was stopped. The file stays also
+   * after a normal answer of `makeSubtitles`, so call it then too, and use
+   * one of the two copies. On the web: `{}`.
+   */
+  pendingSubtitles(options: { resultName: string }): Promise<{ srt?: string }>;
   pickAudio(): Promise<{ uri: string; name: string }>;
   shareText(options: { name: string; text: string }): Promise<void>;
 }
 
 class SubReadWeb implements SubReadPlugin {
+  /** The screen wake lock, while one is held. */
+  private wakeLock: WakeLockSentinel | null = null;
+
   private noOverlay(): Promise<StateLine> {
     return Promise.resolve({ line: 'error=no_overlay' });
   }
@@ -62,6 +161,19 @@ class SubReadWeb implements SubReadPlugin {
   seek(): Promise<StateLine> {
     return this.noOverlay();
   }
+  async keepAwake({ on }: { on: boolean }): Promise<void> {
+    try {
+      if (!on) {
+        const lock = this.wakeLock;
+        this.wakeLock = null;
+        await lock?.release();
+      } else if ('wakeLock' in navigator && (this.wakeLock === null || this.wakeLock.released)) {
+        this.wakeLock = await navigator.wakeLock.request('screen');
+      }
+    } catch {
+      // No wake lock here: a hidden page, a page without HTTPS, or a refusal.
+    }
+  }
   async lookup({ text }: { text: string }): Promise<{ closed: boolean }> {
     try {
       await navigator.clipboard.writeText(text);
@@ -76,8 +188,26 @@ class SubReadWeb implements SubReadPlugin {
   setDictionary(): Promise<void> {
     return Promise.resolve();
   }
+  ankiAdd(): Promise<AnkiResult> {
+    return Promise.resolve({ error: 'not_installed' });
+  }
+  suite(): Promise<SuiteApps> {
+    return Promise.resolve({
+      overlay: false,
+      overlayDebug: false,
+      subread: null,
+      anki: false,
+      dictionaries: 0,
+    });
+  }
+  openOverlay(): Promise<{ opened: 'overlay' | 'settings' }> {
+    return Promise.reject(new Error('Android only.'));
+  }
   makeSubtitles(): Promise<SubtitlesResult> {
     return Promise.resolve({ error: 'not_installed' });
+  }
+  pendingSubtitles(): Promise<{ srt?: string }> {
+    return Promise.resolve({});
   }
   pickAudio(): Promise<{ uri: string; name: string }> {
     return Promise.reject(new Error('Android only.'));
