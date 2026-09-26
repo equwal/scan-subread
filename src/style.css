@@ -283,6 +283,8 @@ body.menu-open #panel {
   flex: 1;
   min-height: 0;
   overflow: auto;
+  /* A scroll bar that comes and goes does not change the width of the page. */
+  scrollbar-gutter: stable;
   padding: 0.5rem;
 }
 
@@ -325,28 +327,22 @@ body.menu-open #panel {
   display: none;
 }
 
+/*
+ * The page fits the viewer width in each orientation, up to 1000 CSS
+ * pixels on a wide screen. The viewer scrolls vertically.
+ */
 #page {
   position: relative;
   margin: 0 auto;
-  width: fit-content;
-  max-width: 100%;
+  width: 100%;
+  max-width: 1000px;
 }
 
-/* The page fits the viewer width. The viewer scrolls vertically. */
 #page canvas {
   display: block;
-  max-width: 100%;
-  width: auto;
+  width: 100%;
   height: auto;
   box-shadow: 0 0 6px #0006;
-}
-
-/* Landscape phone: the page fits the viewer height instead. */
-@media (orientation: landscape) and (max-width: 899px) {
-  #page canvas {
-    max-height: calc(100vh - var(--topbar) - 1rem);
-    max-height: calc(100dvh - var(--topbar) - 1rem);
-  }
 }
 
 /* The padding of a box can go past the edge of the page. The page clips it. */

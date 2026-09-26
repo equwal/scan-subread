@@ -23,6 +23,7 @@ import { nextPage } from './read-order';
 import { say, showPlayer, showReading } from './status';
 import { isAndroid, SubRead } from './subread';
 import { cueIndexAt, parseSubtitles, type Cue } from './subtitles';
+import { createPageView, type Marks } from './view';
 import {
   bookKey,
   clearPages,
@@ -36,9 +37,6 @@ import {
 
 /** Page width in pixels for OCR and the text layer. Boxes are stored in this scale. */
 const OCR_WIDTH = 1600;
-
-/** The space around a box of the mark, in CSS pixels. */
-const BOX_PAD = 2;
 
 /** Milliseconds to wait after a page is read before the cues are aligned again. */
 const ALIGN_DEBOUNCE = 300;
@@ -106,13 +104,14 @@ const state = {
   /** The cue whose box is drawn on the page, or -1. */
   markedCue: -1,
   clock: null as ClockState | null,
-  renderSeq: 0,
   readSeq: 0,
   alignTimer: null as ReturnType<typeof setTimeout> | null,
   srt: null as string | null,
   /** True while the player waits for a dictionary lookup that this app paused. */
   lookupPaused: false,
 };
+
+const view = createPageView(ui, marks);
 
 // --- Settings ---
 
@@ -144,7 +143,7 @@ function loadSettings(): void {
 ui.follow.addEventListener('change', () => {
   settings.set('follow', followMode());
   state.markedCue = -1;
-  drawBoxes();
+  view.mark();
   if (state.clock) applyClock({ ...state.clock, seeked: true });
 });
 ui.pauseLookup.addEventListener('change', () =>
@@ -293,7 +292,7 @@ async function readBook(): Promise<void> {
       state.tokens.splice(at, 0, ...entry.tokens);
       const how = entry.source === 'text' ? 'text layer' : 'OCR';
       showReading(readingText(read(), total, `page ${page + 1}: ${how}`));
-      if (page === state.currentPage) drawBoxes();
+      if (page === state.currentPage) view.mark();
       scheduleAlign();
     }
     const matched = align();
@@ -500,7 +499,7 @@ function applyClock(s: ClockState): void {
   if (!changed || followMode() === 'off') return;
   state.markedCue = out.highlightCue ?? -1;
   if (out.turnToPage !== null) void showPage(out.turnToPage);
-  else drawBoxes();
+  else view.mark();
 }
 
 const clock: ClockSource = isAndroid ? new OverlayClock(SubRead) : new LocalAudioClock(ui.audio);
@@ -539,39 +538,24 @@ function updateNav(): void {
   ui.pageRight.disabled = !pdf || page >= pdf.numPages - 1;
 }
 
+/** The mark of page `index`: one box per text line of the marked cue. */
+function marks(index: number): Marks | null {
+  const entry = state.pages[index];
+  const span = state.spans[state.markedCue];
+  if (!entry || !span) return null;
+  return {
+    width: entry.width,
+    height: entry.height,
+    boxes: (pad) => lineBoxes(state.tokens, span, index, pad),
+  };
+}
+
 async function showPage(index: number): Promise<void> {
   const pdf = state.pdf;
   if (!pdf || index < 0 || index >= pdf.numPages) return;
-  const seq = ++state.renderSeq;
   state.currentPage = index;
   updateNav();
-  // Render at device resolution, up to the OCR width, so zoom stays sharp.
-  const dpr = window.devicePixelRatio || 1;
-  const width = Math.round(Math.min(OCR_WIDTH, Math.max(300, ui.viewer.clientWidth - 16) * dpr));
-  const canvas = await pdf.renderPage(index, width);
-  if (seq !== state.renderSeq) return; // A newer render replaced this one.
-  ui.page.querySelector('canvas')?.remove();
-  ui.page.prepend(canvas);
-  drawBoxes();
-}
-
-/** Draw one box per text line for the marked cue on the current page. */
-function drawBoxes(): void {
-  ui.overlay.replaceChildren();
-  const span = state.spans[state.markedCue];
-  const size = state.pages[state.currentPage];
-  const shown = ui.page.querySelector('canvas')?.getBoundingClientRect().width;
-  if (!span || !size || !shown) return;
-  const pad = (BOX_PAD * size.width) / shown;
-  for (const box of lineBoxes(state.tokens, span, state.currentPage, pad)) {
-    const div = document.createElement('div');
-    div.className = 'box';
-    div.style.left = `${(100 * box.x0) / size.width}%`;
-    div.style.top = `${(100 * box.y0) / size.height}%`;
-    div.style.width = `${(100 * (box.x1 - box.x0)) / size.width}%`;
-    div.style.height = `${(100 * (box.y1 - box.y0)) / size.height}%`;
-    ui.overlay.append(div);
-  }
+  await view.show(pdf, index);
 }
 
 ui.pageLeft.addEventListener('click', () => void showPage(state.currentPage - 1));
