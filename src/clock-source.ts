@@ -26,6 +26,18 @@ export interface ClockSource {
   seek(ms: number): Promise<void>;
 }
 
+/**
+ * The player did not do a command. The message is the reason, the same
+ * word as in `ClockState.error`: `no_player`, `no_overlay`,
+ * `no_notification_access`.
+ */
+export class PlayerError extends Error {
+  constructor(readonly reason: string) {
+    super(reason);
+    this.name = 'PlayerError';
+  }
+}
+
 /** The part of the SubRead plugin that the overlay clock uses. */
 export interface PlayerBridge {
   playerState(): Promise<StateLine>;
@@ -161,30 +173,37 @@ export class OverlayClock implements ClockSource {
     this.emit(positionMs !== undefined);
   }
 
-  private async send(command: Promise<StateLine>): Promise<string> {
+  /**
+   * Waits for the answer to a command. An error line sets the error state,
+   * and the promise rejects with a PlayerError for the reason.
+   */
+  private async send(command: Promise<StateLine>): Promise<void> {
+    let line: string;
     try {
-      return (await command).line;
+      ({ line } = await command);
     } catch {
-      return 'error=no_overlay';
+      line = 'error=no_overlay';
+    }
+    const parsed = parseState(line);
+    if (isPlayerError(parsed)) {
+      this.apply(line, this.now());
+      throw new PlayerError(parsed.error);
     }
   }
 
   async play(): Promise<void> {
-    const line = await this.send(this.bridge.play());
-    if (isPlayerError(parseState(line))) this.apply(line, this.now());
-    else this.local(true);
+    await this.send(this.bridge.play());
+    this.local(true);
   }
 
   async pause(): Promise<void> {
-    const line = await this.send(this.bridge.pause());
-    if (isPlayerError(parseState(line))) this.apply(line, this.now());
-    else this.local(false);
+    await this.send(this.bridge.pause());
+    this.local(false);
   }
 
   async seek(ms: number): Promise<void> {
-    const line = await this.send(this.bridge.seek({ ms: Math.max(0, Math.round(ms)) }));
-    if (isPlayerError(parseState(line))) this.apply(line, this.now());
-    else this.local(this.clock?.playing ?? false, ms);
+    await this.send(this.bridge.seek({ ms: Math.max(0, Math.round(ms)) }));
+    this.local(this.clock?.playing ?? false, ms);
   }
 }
 
@@ -222,6 +241,7 @@ export class LocalAudioClock implements ClockSource {
   }
 
   async play(): Promise<void> {
+    if (!this.audio.src) throw new PlayerError('no_player');
     await this.audio.play();
   }
 
@@ -231,6 +251,7 @@ export class LocalAudioClock implements ClockSource {
   }
 
   seek(ms: number): Promise<void> {
+    if (!this.audio.src) return Promise.reject(new PlayerError('no_player'));
     this.audio.currentTime = Math.max(0, ms) / 1000;
     return Promise.resolve();
   }
