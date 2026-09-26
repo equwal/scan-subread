@@ -33,6 +33,15 @@ describe('normalizeText', () => {
   it('keeps kana, kanji and the long vowel mark', () => {
     expect(normalizeText('コーヒーを飲む。')).toBe('コーヒーを飲む');
   });
+
+  it('gives a stable result when case folding moves combining marks', () => {
+    // fast-check found these inputs. The case map and the filter left the
+    // combining marks out of canonical order, so a second pass changed the text.
+    for (const s of ['\u{1D157}\u{1D165}\u{FC5E}', '\u{130}\u{1D15E}']) {
+      const once = normalizeText(s);
+      expect(normalizeText(once)).toBe(once);
+    }
+  });
 });
 
 describe('alignCuesToTokens on one page', () => {

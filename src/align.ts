@@ -77,16 +77,34 @@ const MAX_LOCAL_EDIT = 2;
 
 const KEEP = /[\p{L}\p{N}\p{M}]/u;
 
+/** A limit on the passes of normalizeText. Real text needs one or two. */
+const MAX_NORMALIZE_PASSES = 4;
+
+/** One pass: NFKC, lowercase, then only letters, numbers and marks. */
+function normalizePass(text: string): string {
+  let out = '';
+  for (const ch of text.normalize('NFKC').toLowerCase()) {
+    if (KEEP.test(ch)) out += ch;
+  }
+  return out;
+}
+
 /**
  * Normalize text for comparison. NFKC folds full-width forms. Lowercase
  * folds case. Only letters, numbers and marks stay. Spaces and punctuation
  * go, so word boundaries do not matter. This works for CJK, where OCR and
  * subtitles rarely agree on spacing.
+ *
+ * The case map and the filter can leave combining marks out of canonical
+ * order, and then one more pass changes the text. The passes repeat until
+ * the text stays the same, so the result is stable.
  */
 export function normalizeText(text: string): string {
-  let out = '';
-  for (const ch of text.normalize('NFKC').toLowerCase()) {
-    if (KEEP.test(ch)) out += ch;
+  let out = normalizePass(text);
+  for (let pass = 1; pass < MAX_NORMALIZE_PASSES; pass++) {
+    const next = normalizePass(out);
+    if (next === out) break;
+    out = next;
   }
   return out;
 }
