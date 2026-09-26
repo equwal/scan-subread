@@ -439,6 +439,11 @@ public class SubReadPlugin extends Plugin {
             call.reject("Cannot write the book text: " + e.getMessage(), e);
             return;
         }
+        // While SubRead runs, Capacitor keeps the options of this call two
+        // times in the saved state of the activity. That state has a limit of
+        // about 1 MB. With a large book text, the reader crashes when SubRead
+        // covers it. SubRead reads the book text from the file, so remove it.
+        call.getData().remove("bookText");
         Uri audioUri = Uri.parse(audio);
         Intent ask = new Intent(ACTION_ALIGN)
             .setPackage(SUBREAD_PACKAGE)
