@@ -30,6 +30,9 @@ const OCR_WIDTH = 1600;
 /** How far from a character a tap may land, as a share of the page width. */
 const TAP_TOLERANCE = 0.015;
 
+/** The space around a box of the mark, in CSS pixels. */
+const BOX_PAD = 2;
+
 /** Milliseconds to wait after a page is read before the cues are aligned again. */
 const ALIGN_DEBOUNCE = 300;
 
@@ -553,8 +556,10 @@ function drawBoxes(): void {
   ui.overlay.replaceChildren();
   const span = state.spans[state.markedCue];
   const size = state.pages[state.currentPage];
-  if (!span || !size) return;
-  for (const box of lineBoxes(state.tokens, span, state.currentPage)) {
+  const shown = ui.page.querySelector('canvas')?.getBoundingClientRect().width;
+  if (!span || !size || !shown) return;
+  const pad = (BOX_PAD * size.width) / shown;
+  for (const box of lineBoxes(state.tokens, span, state.currentPage, pad)) {
     const div = document.createElement('div');
     div.className = 'box';
     div.style.left = `${(100 * box.x0) / size.width}%`;

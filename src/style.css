@@ -215,10 +215,12 @@ body.menu-open #panel {
   }
 }
 
+/* The padding of a box can go past the edge of the page. The page clips it. */
 #overlay {
   position: absolute;
   inset: 0;
   pointer-events: none;
+  overflow: hidden;
 }
 
 .box {
