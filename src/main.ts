@@ -5,7 +5,7 @@
 import { createAligner, type Aligner, type OcrToken, type TokenSpan } from './align';
 import { bookText } from './book-text';
 import { LocalAudioClock, OverlayClock, type ClockSource, type ClockState } from './clock-source';
-import { cueMoved, follow, type FollowMode } from './follower';
+import { follow, pageForCue, type FollowEvent, type FollowMode } from './follower';
 import { lookupText, tapTolerance, tokenAt } from './hit-test';
 import { lineBoxes } from './line-boxes';
 import {
@@ -24,7 +24,7 @@ import { loadPdf, type PdfDoc } from './pdf';
 import { nextPage } from './read-order';
 import { say, showPlayer, showReading } from './status';
 import { isAndroid, SubRead } from './subread';
-import { cueIndexAt, parseSubtitles, type Cue } from './subtitles';
+import { lastCueAt, parseSubtitles, type Cue } from './subtitles';
 import { createPageView, type Marks } from './view';
 import {
   bookKey,
@@ -81,6 +81,8 @@ const ui = {
   syncPage: el<HTMLButtonElement>('sync-page'),
   pageLabel: el<HTMLButtonElement>('page-label'),
   pageInput: el<HTMLInputElement>('page-input'),
+  followNow: el<HTMLButtonElement>('follow-now'),
+  followNote: el<HTMLSpanElement>('follow-note'),
   rtl: el<HTMLInputElement>('rtl'),
   viewer: el<HTMLDivElement>('viewer'),
   empty: el<HTMLElement>('empty'),
@@ -113,6 +115,8 @@ const state = {
   srt: null as string | null,
   /** True while the player waits for a dictionary lookup that this app paused. */
   lookupPaused: false,
+  /** True while a page turn by the user holds the follow. */
+  held: false,
 };
 
 const view = createPageView(ui, marks);
@@ -127,7 +131,7 @@ const nav = setupNav(
     rtl: () => ui.rtl.checked,
     drawerOpen: () => !desktop.matches && document.body.classList.contains('menu-open'),
   },
-  (index) => void showPage(index),
+  turnByUser,
 );
 
 // --- Settings ---
@@ -173,11 +177,10 @@ ui.rtl.addEventListener('change', () => {
   nav.update();
 });
 
+// A new follow mode follows the audio at once.
 ui.follow.addEventListener('change', () => {
   settings.set('follow', followMode());
-  state.markedCue = -1;
-  view.mark();
-  if (state.clock) applyClock({ ...state.clock, seeked: true });
+  runFollow('follow');
 });
 ui.pauseLookup.addEventListener('change', () =>
   settings.set('pauseLookup', ui.pauseLookup.checked ? '1' : '0'),
@@ -237,6 +240,7 @@ ui.pdfFile.addEventListener('change', async () => {
     state.cuePages = [];
     state.activeCue = -1;
     state.markedCue = -1;
+    state.held = false;
     ui.makeSubs.disabled = false;
     ui.empty.hidden = true;
     ui.page.hidden = false;
@@ -453,16 +457,13 @@ function align(): number | null {
   if (state.alignTimer) clearTimeout(state.alignTimer);
   state.alignTimer = null;
   if (!state.aligner || state.cues.length === 0 || state.tokens.length === 0) return null;
-  const before = state.cuePages;
   state.spans = state.aligner.spans(state.pages.map((p) => p?.tokens));
   state.cuePages = state.spans.map((s) => (s.matched ? state.tokens[s.start]!.page : null));
   renderCueList();
-  // Follow again only when the alignment moved the cue of now, for
-  // example when it became matched. A page read in the background must not
-  // undo a page turn by hand.
-  if (state.clock && cueMoved(before, state.cuePages, clockCue(state.clock))) {
-    applyClock({ ...state.clock, seeked: true });
-  }
+  view.mark();
+  // The cue of now can have a new page. A new alignment is no seek, so a
+  // page that the user turned to stays.
+  runFollow('realign');
   return state.cuePages.filter((p) => p !== null).length;
 }
 
@@ -477,7 +478,7 @@ function renderCueList(): void {
       const span = state.spans[i];
       if (span && !span.matched) li.classList.add('unmatched');
       if (i === state.activeCue) li.classList.add('active');
-      li.addEventListener('click', () => void clock.seek(cue.start * 1000).catch(sayError));
+      li.addEventListener('click', () => seek(cue.start * 1000));
       return li;
     }),
   );
@@ -507,33 +508,61 @@ function showPlayerStatus(s: ClockState): void {
   showPlayer(state.pdf ? playerMessage(s, isAndroid) : null);
 }
 
-/** The cue at the position of a clock state, or -1. */
-function clockCue(s: ClockState): number {
-  return s.positionMs === null ? -1 : cueIndexAt(state.cues, s.positionMs / 1000);
+/**
+ * The follow for the last state of the clock: mark the cue of now, and
+ * turn to its page unless the follow is held. In the silence between two
+ * cues, the cue before stays the cue of now.
+ */
+function runFollow(event: FollowEvent): void {
+  const s = state.clock;
+  const cue = s?.positionMs == null ? -1 : lastCueAt(state.cues, s.positionMs / 1000);
+  if (cue !== state.activeCue) {
+    markCueInList(cue);
+    state.activeCue = cue;
+  }
+  const mode = followMode();
+  const page = cue < 0 ? null : pageForCue(state.cuePages, cue);
+  const out = follow({
+    mode,
+    currentPage: state.currentPage,
+    cue,
+    matched: cue >= 0 && state.cuePages[cue] != null,
+    page,
+    held: state.held,
+    event,
+  });
+  state.held = out.held;
+  // The Follow button shows only when it has a page to go to.
+  const paused = out.held && mode !== 'off' && page !== null;
+  ui.followNow.hidden = !paused;
+  ui.followNote.hidden = !paused;
+  const marked = out.highlightCue ?? -1;
+  const markMoved = marked !== state.markedCue;
+  state.markedCue = marked;
+  if (out.turnToPage !== null) void showPage(out.turnToPage);
+  else if (markMoved) view.mark();
 }
 
-/** One state of the clock: mark the cue of now and turn the page. */
+/** One state of the clock. A jump of the audio is a seek. */
 function applyClock(s: ClockState): void {
   state.clock = s;
   showPlayerStatus(s);
-  const cue = clockCue(s);
-  // The last cue stays marked in the silence between two cues.
-  if (cue < 0) return;
-  const out = follow({
-    cuePages: state.cuePages,
-    mode: followMode(),
-    currentPage: state.currentPage,
-    previousCue: state.activeCue,
-    cue,
-    seeked: s.seeked,
-  });
-  const changed = cue !== state.activeCue || s.seeked;
-  if (cue !== state.activeCue) markCueInList(cue);
-  state.activeCue = cue;
-  if (!changed || followMode() === 'off') return;
-  state.markedCue = out.highlightCue ?? -1;
-  if (out.turnToPage !== null) void showPage(out.turnToPage);
-  else view.mark();
+  runFollow(s.seeked ? 'seek' : 'tick');
+}
+
+/** A page turn by the user. It holds the follow, until the audio reaches the page. */
+function turnByUser(index: number): void {
+  state.held = true;
+  void showPage(index);
+  runFollow('tick');
+}
+
+/** Moves the audio from this app. The follow is not held after it. */
+function seek(ms: number): void {
+  clock.seek(ms).then(() => {
+    state.held = false;
+    say(`Audio moved to ${clockText(ms)}.`);
+  }, sayError);
 }
 
 const clock: ClockSource = isAndroid ? new OverlayClock(SubRead) : new LocalAudioClock(ui.audio);
@@ -544,14 +573,15 @@ ui.play.addEventListener('click', () => {
   action.catch(sayError);
 });
 
+ui.followNow.addEventListener('click', () => runFollow('follow'));
+
 ui.syncPage.addEventListener('click', () => {
   const i = state.cuePages.indexOf(state.currentPage);
   if (i < 0) {
     say('No cue of the subtitles is on this page.');
     return;
   }
-  const ms = state.cues[i]!.start * 1000;
-  clock.seek(ms).then(() => say(`Audio moved to ${clockText(ms)}.`), sayError);
+  seek(state.cues[i]!.start * 1000);
 });
 
 ui.audioFile.addEventListener('change', () => {

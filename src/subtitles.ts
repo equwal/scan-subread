@@ -49,8 +49,11 @@ export function parseSubtitles(input: string): Cue[] {
   return cues;
 }
 
-/** Index of the cue active at time t, or -1. Cues must be sorted by start. */
-export function cueIndexAt(cues: readonly Cue[], t: number): number {
+/**
+ * Index of the last cue that starts at or before time t, or -1. In the
+ * silence after a cue, this is still that cue. Cues must be sorted by start.
+ */
+export function lastCueAt(cues: readonly Pick<Cue, 'start'>[], t: number): number {
   let lo = 0;
   let hi = cues.length - 1;
   let found = -1;
@@ -63,6 +66,12 @@ export function cueIndexAt(cues: readonly Cue[], t: number): number {
       hi = mid - 1;
     }
   }
+  return found;
+}
+
+/** Index of the cue active at time t, or -1. Cues must be sorted by start. */
+export function cueIndexAt(cues: readonly Cue[], t: number): number {
+  const found = lastCueAt(cues, t);
   if (found >= 0 && t < cues[found]!.end) return found;
   return -1;
 }

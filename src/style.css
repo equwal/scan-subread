@@ -2,6 +2,7 @@
   color-scheme: light dark;
   font-family: system-ui, sans-serif;
   --highlight: rgba(255, 200, 0, 0.45);
+  --highlight-solid: rgb(255, 200, 0);
   --highlight-weak: rgba(120, 160, 255, 0.35);
   --topbar: 2.75rem;
   --panel-width: 22rem;
@@ -102,6 +103,18 @@ body {
   overflow: hidden;
   text-overflow: ellipsis;
   font-variant-numeric: tabular-nums;
+}
+
+/* The Follow button shows while a page turn by the user holds the follow. */
+#topbar #follow-now {
+  padding: 0 0.6rem;
+  font-weight: 600;
+  color: #1a1a1a;
+  background: var(--highlight-solid);
+}
+
+#follow-note {
+  font-weight: 600;
 }
 
 /* The page jump takes the place of the page label. */
@@ -339,7 +352,7 @@ body.zoomed #viewer {
   border-radius: 8px;
   border: none;
   color: #1a1a1a;
-  background: rgb(255, 200, 0);
+  background: var(--highlight-solid);
   cursor: pointer;
 }
 

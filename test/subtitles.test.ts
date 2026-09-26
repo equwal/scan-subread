@@ -1,6 +1,6 @@
 import fc from 'fast-check';
 import { describe, expect, it } from 'vitest';
-import { cueIndexAt, parseSubtitles } from '../src/subtitles';
+import { cueIndexAt, lastCueAt, parseSubtitles } from '../src/subtitles';
 
 const SRT = `1
 00:00:01,000 --> 00:00:03,500
@@ -77,6 +77,38 @@ describe('cueIndexAt', () => {
         const got = cueIndexAt(sorted, t);
         const linear = sorted.findIndex((c) => c.start <= t && t < c.end);
         expect(got).toBe(linear);
+      }),
+    );
+  });
+});
+
+describe('lastCueAt', () => {
+  const cues = [
+    { start: 1, end: 2 },
+    { start: 3, end: 4 },
+  ];
+
+  it('gives the last cue that started, also in the silence after it', () => {
+    expect(lastCueAt(cues, 0.5)).toBe(-1);
+    expect(lastCueAt(cues, 1)).toBe(0);
+    expect(lastCueAt(cues, 2.5)).toBe(0);
+    expect(lastCueAt(cues, 3)).toBe(1);
+    expect(lastCueAt(cues, 99)).toBe(1);
+    expect(lastCueAt([], 1)).toBe(-1);
+  });
+
+  it('agrees with a linear scan', () => {
+    const starts = fc
+      .array(fc.nat({ max: 100 }), { maxLength: 30 })
+      .map((s) => s.sort((a, b) => a - b));
+    fc.assert(
+      fc.property(starts, fc.integer({ min: -5, max: 110 }), (sorted, t) => {
+        const list = sorted.map((start) => ({ start }));
+        let linear = -1;
+        list.forEach((c, i) => {
+          if (c.start <= t) linear = i;
+        });
+        expect(lastCueAt(list, t)).toBe(linear);
       }),
     );
   });
