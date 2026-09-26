@@ -63,6 +63,10 @@ describe('the web fallback of the plugin', () => {
     });
   });
 
+  it('has no result file of SubRead', async () => {
+    await expect(SubRead.pendingSubtitles({ resultName: 'book.srt' })).resolves.toEqual({});
+  });
+
   it('cannot open SubRead Overlay', async () => {
     await expect(SubRead.openOverlay()).rejects.toThrow('Android only.');
   });

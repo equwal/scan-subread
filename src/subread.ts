@@ -110,11 +110,34 @@ export interface SubReadPlugin {
    * On the web: rejects with Error('Android only.').
    */
   openOverlay(): Promise<{ opened: 'overlay' | 'settings' }>;
+  /**
+   * Asks SubRead for the .srt of the audio and the book text
+   * (`space.subread.app.action.ALIGN`), and resolves with the answer of
+   * SubRead.
+   *
+   * `resultName` names a result file for the book, for example a name that
+   * the caller makes from the book key. The plugin keeps A-Z, a-z, 0-9, ".",
+   * "_" and "-" of the name, and changes each other character to "_". The
+   * call removes the result of an earlier job with the same name. SubRead
+   * 0.10.0 and later write the .srt into the file before they answer, so
+   * the .srt is safe when Android stops the reader during the job. Older
+   * versions ignore the file. See `pendingSubtitles`.
+   */
   makeSubtitles(options: {
     audio: string;
     bookText: string;
     language: string;
+    resultName?: string;
   }): Promise<SubtitlesResult>;
+  /**
+   * The .srt that SubRead wrote into the result file `resultName` of
+   * `makeSubtitles`, or `{}` when the file is not there or is empty. The
+   * call removes the file after it reads it. Call it when the book opens,
+   * for a job that ended while the reader was stopped. The file stays also
+   * after a normal answer of `makeSubtitles`, so call it then too, and use
+   * one of the two copies. On the web: `{}`.
+   */
+  pendingSubtitles(options: { resultName: string }): Promise<{ srt?: string }>;
   pickAudio(): Promise<{ uri: string; name: string }>;
   shareText(options: { name: string; text: string }): Promise<void>;
 }
@@ -182,6 +205,9 @@ class SubReadWeb implements SubReadPlugin {
   }
   makeSubtitles(): Promise<SubtitlesResult> {
     return Promise.resolve({ error: 'not_installed' });
+  }
+  pendingSubtitles(): Promise<{ srt?: string }> {
+    return Promise.resolve({});
   }
   pickAudio(): Promise<{ uri: string; name: string }> {
     return Promise.reject(new Error('Android only.'));

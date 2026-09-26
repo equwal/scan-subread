@@ -28,6 +28,7 @@ import com.getcapacitor.annotation.ActivityCallback;
 import com.getcapacitor.annotation.CapacitorPlugin;
 import java.io.ByteArrayOutputStream;
 import java.io.File;
+import java.io.FileInputStream;
 import java.io.FileOutputStream;
 import java.io.IOException;
 import java.io.InputStream;
@@ -46,7 +47,8 @@ import java.util.List;
  *   Dictionary, Takoboto, AnkiDroid and other apps in the text selection
  *   menu. The lookup resolves when the dictionary closes.
  * - The subtitle maker, through the intent API of the SubRead app
- *   (`space.subread.app.action.ALIGN`).
+ *   (`space.subread.app.action.ALIGN`). SubRead 0.10.0 and later also
+ *   write the .srt into a result file of this app.
  * - SubRead Anki, through `space.subread.anki.action.ADD`: a card for a
  *   word and its sentence.
  * - The package manager: which apps of the suite are installed. SubRead
@@ -79,8 +81,12 @@ public class SubReadPlugin extends Plugin {
     private static final String EXTRA_CUES = "space.subread.extra.CUES";
     private static final String EXTRA_MATCH_RATE = "space.subread.extra.MATCH_RATE";
     private static final String EXTRA_ERROR = "space.subread.extra.ERROR";
+    private static final String EXTRA_RESULT = "space.subread.extra.RESULT";
 
     private static final String SHARE_DIR = "share";
+
+    /** The folder in filesDir for the result files of SubRead. See file_paths.xml. */
+    private static final String RESULT_DIR = "subread";
 
     private static final String ANKI_PACKAGE = "space.subread.anki";
     private static final String ACTION_ANKI_ADD = "space.subread.anki.action.ADD";
@@ -423,13 +429,52 @@ public class SubReadPlugin extends Plugin {
         return ret;
     }
 
+    /**
+     * A safe file name: the name keeps A-Z, a-z, 0-9, ".", "_" and "-", and
+     * each other character becomes "_". So the name cannot point to another
+     * folder. Null when no file can have the name.
+     */
+    static String safeFileName(String name) {
+        String safe = name.replaceAll("[^A-Za-z0-9._-]", "_");
+        if (safe.isEmpty() || safe.equals(".") || safe.equals("..") || safe.length() > 255) return null;
+        return safe;
+    }
+
+    /** The result file for `resultName`: filesDir/subread/<safe name>, or null. */
+    private File resultFile(String resultName) {
+        String name = safeFileName(resultName);
+        return name == null ? null : new File(new File(getContext().getFilesDir(), RESULT_DIR), name);
+    }
+
+    /**
+     * Makes the folder of a result file and removes the result of an earlier
+     * job, so that pendingSubtitles gives only the result of the new job.
+     * Returns the FileProvider Uri of the file.
+     */
+    private Uri clearResult(File file) throws IOException {
+        File dir = file.getParentFile();
+        if (dir != null && !dir.isDirectory() && !dir.mkdirs()) throw new IOException("Cannot create " + dir);
+        if (file.exists() && !file.delete()) throw new IOException("Cannot remove " + file);
+        return FileProvider.getUriForFile(getContext(), getContext().getPackageName() + ".fileprovider", file);
+    }
+
+    /**
+     * Asks SubRead for the .srt of the audio and the book text. The optional
+     * `resultName` names a result file, see pendingSubtitles.
+     */
     @PluginMethod
     public void makeSubtitles(PluginCall call) {
         String audio = call.getString("audio");
         String bookText = call.getString("bookText");
         String language = call.getString("language", "auto");
+        String resultName = call.getString("resultName");
         if (audio == null || bookText == null) {
             call.reject("audio and bookText are required.");
+            return;
+        }
+        File result = resultName == null ? null : resultFile(resultName);
+        if (resultName != null && result == null) {
+            call.reject("resultName is not a usable file name.");
             return;
         }
         Uri bookUri;
@@ -438,6 +483,15 @@ public class SubReadPlugin extends Plugin {
         } catch (IOException e) {
             call.reject("Cannot write the book text: " + e.getMessage(), e);
             return;
+        }
+        Uri resultUri = null;
+        if (result != null) {
+            try {
+                resultUri = clearResult(result);
+            } catch (IOException e) {
+                call.reject("Cannot make the result file: " + e.getMessage(), e);
+                return;
+            }
         }
         // While SubRead runs, Capacitor keeps the options of this call two
         // times in the saved state of the activity. That state has a limit of
@@ -453,13 +507,63 @@ public class SubReadPlugin extends Plugin {
         // SubRead must be able to read both files.
         ClipData clip = ClipData.newRawUri("audio", audioUri);
         clip.addItem(new ClipData.Item(bookUri));
+        if (resultUri != null) {
+            // SubRead 0.10.0 and later write the .srt into this file before
+            // they answer, so the .srt is safe when Android stops the reader
+            // during the job. Older versions ignore the extra.
+            ask.putExtra(EXTRA_RESULT, resultUri);
+            clip.addItem(new ClipData.Item(resultUri));
+        }
         ask.setClipData(clip);
         ask.addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION);
         if (ask.resolveActivity(getContext().getPackageManager()) == null) {
             call.resolve(errorObject("not_installed"));
             return;
         }
+        if (resultUri != null) {
+            // SubRead must be able to write the result file. The intent flag
+            // FLAG_GRANT_WRITE_URI_PERMISSION asks for write access to each
+            // file of the clip, the audio file too. This app can only read the
+            // audio file, so startActivity would throw SecurityException. So
+            // only the result file gets write access.
+            getContext().grantUriPermission(SUBREAD_PACKAGE, resultUri, Intent.FLAG_GRANT_WRITE_URI_PERMISSION);
+        }
         startActivityForResult(call, ask, "subtitlesResult");
+    }
+
+    /**
+     * Gives the .srt that SubRead wrote into the result file `resultName`,
+     * and removes the file. SubRead can finish while Android has stopped the
+     * reader. Then the activity result is lost, but the file is there.
+     * Resolves no srt when the file is not there or is empty.
+     */
+    @PluginMethod
+    public void pendingSubtitles(PluginCall call) {
+        String resultName = call.getString("resultName");
+        if (resultName == null) {
+            call.reject("resultName is required.");
+            return;
+        }
+        File file = resultFile(resultName);
+        if (file == null) {
+            call.reject("resultName is not a usable file name.");
+            return;
+        }
+        JSObject ret = new JSObject();
+        if (file.isFile() && file.length() > 0) {
+            try (InputStream in = new FileInputStream(file)) {
+                ret.put("srt", readAll(in));
+            } catch (IOException e) {
+                call.reject("Cannot read the result file: " + e.getMessage(), e);
+                return;
+            }
+            // The job is done, so SubRead needs no more write access.
+            Uri uri = FileProvider.getUriForFile(getContext(), getContext().getPackageName() + ".fileprovider", file);
+            getContext().revokeUriPermission(uri, Intent.FLAG_GRANT_WRITE_URI_PERMISSION);
+            // When the delete fails, the next call gives the same .srt again.
+            file.delete();
+        }
+        call.resolve(ret);
     }
 
     private static String readAll(InputStream in) throws IOException {
