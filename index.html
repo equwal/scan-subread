@@ -22,6 +22,16 @@
         <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M15 5l-7 7 7 7" /></svg>
       </button>
       <button id="page-label" title="Go to a page" disabled>No PDF</button>
+      <input
+        id="page-input"
+        type="text"
+        inputmode="numeric"
+        enterkeyhint="go"
+        autocomplete="off"
+        aria-label="Go to page"
+        title="Type a page number. Enter goes, Escape cancels."
+        hidden
+      />
       <button id="page-right" class="icon" aria-label="Next page" title="Next page" disabled>
         <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M9 5l7 7-7 7" /></svg>
       </button>
@@ -106,6 +116,9 @@
           <option value="jpn+eng">Japanese + English</option>
         </select>
       </label>
+      <label class="check"
+        ><input id="rtl" type="checkbox" /> Pages turn right to left (vertical Japanese)</label
+      >
       <label class="check"
         ><input id="force-ocr" type="checkbox" /> Force OCR (the text layer of the PDF is
         wrong)</label

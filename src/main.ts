@@ -17,7 +17,9 @@ import {
   playerMessage,
   readingText,
 } from './messages';
+import { setupNav } from './nav';
 import { createOcr, type Ocr } from './ocr';
+import { defaultRtl } from './paging';
 import { loadPdf, type PdfDoc } from './pdf';
 import { nextPage } from './read-order';
 import { say, showPlayer, showReading } from './status';
@@ -78,6 +80,8 @@ const ui = {
   play: el<HTMLButtonElement>('play'),
   syncPage: el<HTMLButtonElement>('sync-page'),
   pageLabel: el<HTMLButtonElement>('page-label'),
+  pageInput: el<HTMLInputElement>('page-input'),
+  rtl: el<HTMLInputElement>('rtl'),
   viewer: el<HTMLDivElement>('viewer'),
   empty: el<HTMLElement>('empty'),
   openPdf: el<HTMLButtonElement>('open-pdf'),
@@ -113,6 +117,19 @@ const state = {
 
 const view = createPageView(ui, marks);
 
+const desktop = window.matchMedia('(min-width: 900px)');
+
+const nav = setupNav(
+  ui,
+  {
+    pages: () => state.pdf?.numPages ?? 0,
+    current: () => state.currentPage,
+    rtl: () => ui.rtl.checked,
+    drawerOpen: () => !desktop.matches && document.body.classList.contains('menu-open'),
+  },
+  (index) => void showPage(index),
+);
+
 // --- Settings ---
 
 const settings = {
@@ -138,7 +155,23 @@ function loadSettings(): void {
   ui.subLang.value = settings.get('subLang', 'auto');
   ui.forceOcr.checked = settings.get('forceOcr', '0') === '1';
   ui.pauseLookup.checked = settings.get('pauseLookup', '1') === '1';
+  loadRtl();
 }
+
+/**
+ * The reading direction: the setting of the user, else the default for
+ * the OCR language, so that vertical Japanese turns right to left.
+ */
+function loadRtl(): void {
+  const saved = settings.get('rtl', '');
+  ui.rtl.checked = saved === '' ? defaultRtl(ui.lang.value) : saved === '1';
+  nav.update();
+}
+
+ui.rtl.addEventListener('change', () => {
+  settings.set('rtl', ui.rtl.checked ? '1' : '0');
+  nav.update();
+});
 
 ui.follow.addEventListener('change', () => {
   settings.set('follow', followMode());
@@ -152,6 +185,7 @@ ui.pauseLookup.addEventListener('change', () =>
 ui.subLang.addEventListener('change', () => settings.set('subLang', ui.subLang.value));
 ui.lang.addEventListener('change', () => {
   settings.set('lang', ui.lang.value);
+  loadRtl();
   void readBook();
 });
 ui.forceOcr.addEventListener('change', () => {
@@ -528,16 +562,6 @@ ui.audioFile.addEventListener('change', () => {
 
 // --- Page view ---
 
-/** Shows the page label, and enables the arrows that lead to a page. */
-function updateNav(): void {
-  const pdf = state.pdf;
-  const page = state.currentPage;
-  ui.pageLabel.disabled = !pdf;
-  ui.pageLabel.textContent = pdf ? `${page + 1} / ${pdf.numPages}` : 'No PDF';
-  ui.pageLeft.disabled = !pdf || page <= 0;
-  ui.pageRight.disabled = !pdf || page >= pdf.numPages - 1;
-}
-
 /** The mark of page `index`: one box per text line of the marked cue. */
 function marks(index: number): Marks | null {
   const entry = state.pages[index];
@@ -554,12 +578,9 @@ async function showPage(index: number): Promise<void> {
   const pdf = state.pdf;
   if (!pdf || index < 0 || index >= pdf.numPages) return;
   state.currentPage = index;
-  updateNav();
+  nav.update();
   await view.show(pdf, index);
 }
-
-ui.pageLeft.addEventListener('click', () => void showPage(state.currentPage - 1));
-ui.pageRight.addEventListener('click', () => void showPage(state.currentPage + 1));
 
 // --- Tap on a word ---
 
