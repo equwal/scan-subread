@@ -45,6 +45,8 @@ import java.util.List;
  *   menu. The lookup resolves when the dictionary closes.
  * - The subtitle maker, through the intent API of the SubRead app
  *   (`space.subread.app.action.ALIGN`).
+ * - SubRead Anki, through `space.subread.anki.action.ADD`: a card for a
+ *   word and its sentence.
  * - The screen, which stays on during read-along.
  */
 @CapacitorPlugin(name = "SubRead")
@@ -72,10 +74,20 @@ public class SubReadPlugin extends Plugin {
 
     private static final String SHARE_DIR = "share";
 
+    private static final String ANKI_PACKAGE = "space.subread.anki";
+    private static final String ACTION_ANKI_ADD = "space.subread.anki.action.ADD";
+    private static final String EXTRA_ANKI_WORD = "space.subread.anki.extra.WORD";
+    private static final String EXTRA_ANKI_READING = "space.subread.anki.extra.READING";
+    private static final String EXTRA_ANKI_SENTENCE = "space.subread.anki.extra.SENTENCE";
+    private static final String EXTRA_ANKI_TEXT = "space.subread.anki.extra.TEXT";
+    private static final String EXTRA_ANKI_SOURCE = "space.subread.anki.extra.SOURCE";
+    private static final String EXTRA_ANKI_SHOW = "space.subread.anki.extra.SHOW";
+    private static final String EXTRA_ANKI_NOTE_ID = "space.subread.anki.extra.NOTE_ID";
+
     /** The authority that answered last. It is tried first. */
     private String authority;
 
-    /** Tells when the dictionary is closed. */
+    /** Tells when the dictionary or SubRead Anki is closed. */
     private final ReturnWatch returns = new ReturnWatch();
 
     @Override
@@ -271,6 +283,53 @@ public class SubReadPlugin extends Plugin {
         String component = call.getString("component", "");
         prefs().edit().putString(PREF_DICTIONARY, component == null ? "" : component).apply();
         call.resolve();
+    }
+
+    // --- The card maker, through SubRead Anki ---
+
+    /** Puts the text option `name` in the extra `extra`, when the caller gave it. */
+    private static void putText(Intent intent, PluginCall call, String name, String extra) {
+        String value = call.getString(name);
+        if (value != null && !value.isEmpty()) intent.putExtra(extra, value);
+    }
+
+    /** Asks SubRead Anki to make a card. SubRead Anki needs a word or a text. */
+    @PluginMethod
+    public void ankiAdd(PluginCall call) {
+        Intent add = new Intent(ACTION_ANKI_ADD).setPackage(ANKI_PACKAGE);
+        putText(add, call, "word", EXTRA_ANKI_WORD);
+        putText(add, call, "reading", EXTRA_ANKI_READING);
+        putText(add, call, "sentence", EXTRA_ANKI_SENTENCE);
+        putText(add, call, "text", EXTRA_ANKI_TEXT);
+        putText(add, call, "source", EXTRA_ANKI_SOURCE);
+        if (!add.hasExtra(EXTRA_ANKI_WORD) && !add.hasExtra(EXTRA_ANKI_TEXT)) {
+            call.reject("word or text is required.");
+            return;
+        }
+        Boolean show = call.getBoolean("show");
+        if (show != null) add.putExtra(EXTRA_ANKI_SHOW, show.booleanValue());
+        if (add.resolveActivity(getContext().getPackageManager()) == null) {
+            call.resolve(errorObject("not_installed"));
+            return;
+        }
+        returns.launched();
+        startActivityForResult(call, add, "ankiResult");
+    }
+
+    /** SubRead Anki gave its result: the note is in Anki, or the user closed the card. */
+    @ActivityCallback
+    private void ankiResult(PluginCall call, ActivityResult result) {
+        if (call == null) return;
+        returns.result(() -> {
+            JSObject ret = new JSObject();
+            Intent data = result.getData();
+            boolean added = result.getResultCode() == Activity.RESULT_OK;
+            ret.put("added", added);
+            if (added && data != null && data.hasExtra(EXTRA_ANKI_NOTE_ID)) {
+                ret.put("noteId", data.getLongExtra(EXTRA_ANKI_NOTE_ID, 0));
+            }
+            call.resolve(ret);
+        });
     }
 
     // --- The subtitle maker, through the SubRead app ---

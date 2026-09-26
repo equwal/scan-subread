@@ -1,8 +1,8 @@
 // The bridge to the SubRead suite: the typed side of SubReadPlugin.java.
 //
 // On the web there is no suite. The fallback reports no overlay, copies a
-// lookup to the clipboard, and cannot make subtitles. It keeps the screen on
-// with the Screen Wake Lock API when the browser has it.
+// lookup to the clipboard, and cannot make subtitles or cards. It keeps the
+// screen on with the Screen Wake Lock API when the browser has it.
 
 import { Capacitor, registerPlugin } from '@capacitor/core';
 
@@ -28,6 +28,31 @@ export interface SubtitlesResult {
   error?: string;
 }
 
+/** A card for SubRead Anki. Give `word` or `text`. */
+export interface AnkiCard {
+  /** The word, in its dictionary form when the caller knows it. */
+  word?: string;
+  /** The reading of the word, in kana. */
+  reading?: string;
+  /** The sentence that holds the word, as plain text: see `sentenceAround`. */
+  sentence?: string;
+  /** A text with no word chosen: the user taps the word on the card. */
+  text?: string;
+  /** Where the sentence is from, for example the title of the book. */
+  source?: string;
+  /** True: show the card before it goes to Anki. */
+  show?: boolean;
+}
+
+export interface AnkiResult {
+  /** True when the note is in Anki. False when the user closed the card. */
+  added?: boolean;
+  /** The id of the new note in Anki, when `added` is true. */
+  noteId?: number;
+  /** SubRead Anki is not on the device. */
+  error?: 'not_installed';
+}
+
 export interface SubReadPlugin {
   playerState(): Promise<StateLine>;
   play(): Promise<StateLine>;
@@ -49,6 +74,16 @@ export interface SubReadPlugin {
   dictionaries(): Promise<{ apps: DictionaryApp[]; chosen: string }>;
   /** An empty component means: ask each time. */
   setDictionary(options: { component: string }): Promise<void>;
+  /**
+   * Makes a card in SubRead Anki (`space.subread.anki.action.ADD`). Only the
+   * fields that are given and not empty go to SubRead Anki; without `word`
+   * and `text` the call rejects. Resolves when SubRead Anki closes, the same
+   * as `lookup`: `{ added: true, noteId }` when the note is in Anki,
+   * `{ added: false }` when the user closed the card, and
+   * `{ error: 'not_installed' }` without SubRead Anki. On the web:
+   * `{ error: 'not_installed' }`.
+   */
+  ankiAdd(options: AnkiCard): Promise<AnkiResult>;
   makeSubtitles(options: {
     audio: string;
     bookText: string;
@@ -103,6 +138,9 @@ class SubReadWeb implements SubReadPlugin {
   }
   setDictionary(): Promise<void> {
     return Promise.resolve();
+  }
+  ankiAdd(): Promise<AnkiResult> {
+    return Promise.resolve({ error: 'not_installed' });
   }
   makeSubtitles(): Promise<SubtitlesResult> {
     return Promise.resolve({ error: 'not_installed' });

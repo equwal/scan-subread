@@ -47,6 +47,12 @@ describe('the web fallback of the plugin', () => {
     expect(locks[1]!.released).toBe(true);
   });
 
+  it('has no SubRead Anki', async () => {
+    await expect(SubRead.ankiAdd({ word: '猫', sentence: '吾輩は猫である。' })).resolves.toEqual({
+      error: 'not_installed',
+    });
+  });
+
   it('ignores a browser with no wake lock, and a refused request', async () => {
     vi.stubGlobal('navigator', {});
     await expect(SubRead.keepAwake({ on: true })).resolves.toBeUndefined();
