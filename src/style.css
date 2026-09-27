@@ -371,6 +371,38 @@ body.zoomed #viewer {
   display: none;
 }
 
+#suite-checklist h3,
+#suite h2 {
+  margin: 0 0 0.3rem;
+  font-size: 0.95rem;
+}
+
+/* The checklist of the SubRead suite: a mark, the text, then a link or a button. */
+.suite {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 0.35rem;
+  font-size: 0.85rem;
+}
+
+.suite li::before {
+  content: '✓';
+  display: inline-block;
+  width: 1.3em;
+  font-weight: 700;
+}
+
+.suite li.missing::before {
+  content: '✗';
+}
+
+.suite a {
+  color: inherit;
+}
+
 /*
  * The page fits the viewer width in each orientation, up to 1000 CSS
  * pixels on a wide screen. The viewer scrolls vertically.

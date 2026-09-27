@@ -51,6 +51,7 @@ import { nextPage } from './read-order';
 import { scrollTarget } from './scroll';
 import { fill, onAction, say, showPlayer, showReading } from './status';
 import { isAndroid, SubRead, type SubtitlesResult, type SuiteApps } from './subread';
+import { suiteChecklist } from './suite';
 import { decodeSubtitles, lastCueAt, parseSubtitles, type Cue } from './subtitles';
 import {
   bookKey,
@@ -113,6 +114,9 @@ const ui = {
   pauseLookup: el<HTMLInputElement>('pause-lookup'),
   clearBook: el<HTMLButtonElement>('clear-book'),
   clearAll: el<HTMLButtonElement>('clear-all'),
+  suite: el<HTMLElement>('suite'),
+  suiteList: el<HTMLUListElement>('suite-list'),
+  suiteChecklist: el<HTMLDivElement>('suite-checklist'),
   cues: el<HTMLOListElement>('cues'),
   pageLeft: el<HTMLButtonElement>('page-left'),
   pageRight: el<HTMLButtonElement>('page-right'),
@@ -177,6 +181,8 @@ const state = {
   awake: false,
   /** The apps of the SubRead suite on the device, or null before the first answer. */
   suite: null as SuiteApps | null,
+  /** The player error that the checklist shows. Undefined before the first player state. */
+  suiteError: undefined as string | null | undefined,
   /** True while a page turn by the user holds the follow. */
   held: false,
 };
@@ -1007,6 +1013,8 @@ function showPlayerStatus(s: ClockState): void {
   showPlayer(state.pdf ? playerMessage(s, isAndroid, overlayInstalled()) : null);
   updateSyncPage();
   updateAwake();
+  // The checklist shows the notification access of the last player state.
+  if (s.error !== state.suiteError) renderSuite();
 }
 
 /** True when SubRead Overlay, the release or the debug build, is on the device. */
@@ -1143,14 +1151,42 @@ if (isAndroid) {
   });
 }
 
-/** Asks which apps of the SubRead suite are installed. */
+/** Asks which apps of the SubRead suite are installed, and shows the checklist. */
 async function refreshSuite(): Promise<void> {
   try {
     state.suite = await SubRead.suite();
   } catch {
     return;
   }
+  renderSuite();
   if (state.clock) showPlayerStatus(state.clock);
+}
+
+/**
+ * Shows the checklist of the SubRead suite on the start card and in the
+ * menu (Android only). The notification access of SubRead Overlay comes
+ * from the last player state.
+ */
+function renderSuite(): void {
+  const apps = state.suite;
+  if (!isAndroid || !apps) return;
+  state.suiteError = state.clock?.error;
+  const items = suiteChecklist(apps, state.suiteError);
+  const list = (): HTMLLIElement[] =>
+    items.map((item) => {
+      const li = document.createElement('li');
+      li.className = item.ok ? 'ok' : 'missing';
+      fill(li, item);
+      return li;
+    });
+  ui.suiteList.replaceChildren(...list());
+  const title = document.createElement('h3');
+  title.textContent = 'SubRead suite';
+  const card = document.createElement('ul');
+  card.className = 'suite';
+  card.append(...list());
+  ui.suiteChecklist.replaceChildren(title, card);
+  ui.suite.hidden = false;
 }
 
 ui.play.addEventListener('click', () => {
