@@ -1,0 +1,7 @@
+* A new icon.
+* A book that you open wins over the restore of the last book.
+* Subtitles stay with the book that loads.
+* A SubRead result for a closed book is offered when that book opens.
+* The menu tells when SubRead waits for pages that could not be read, with Retry.
+* OCR start has a time limit and its own error message.
+* Each status message is readable on a phone.

@@ -1,0 +1,42 @@
+Categories:
+  - Audiobook
+  - Reading
+  - Science & Education
+License: AGPL-3.0-only
+AuthorName: equwal
+SourceCode: https://github.com/equwal/scan-subread
+IssueTracker: https://github.com/equwal/scan-subread/issues
+Changelog: https://github.com/equwal/scan-subread/releases
+Donate: https://ko-fi.com/truex
+
+AutoName: Scan SubRead
+
+RepoType: git
+Repo: https://github.com/equwal/scan-subread.git
+Binaries:
+  https://github.com/equwal/scan-subread/releases/download/v%v/Scan-SubRead-%v.apk
+
+Builds:
+  - versionName: 0.1.1
+    versionCode: 2
+    commit: v0.1.1
+    subdir: android/app
+    sudo:
+      - curl -Lo node.tar.xz https://nodejs.org/dist/v22.23.3/node-v22.23.3-linux-x64.tar.xz
+      - echo "df450af89261115ef9f9e3830c3eeb2cc9213b63c720b1af623cb5dcbe2e02de  node.tar.xz"
+        | sha256sum -c -
+      - tar xJf node.tar.xz --strip-components=1 -C /usr/local
+      - rm node.tar.xz
+    init: cd ../.. && npm ci --no-audit --no-fund
+    gradle:
+      - yes
+    prebuild: cd ../.. && npm run build && npx cap sync android
+    scandelete:
+      - node_modules
+
+AllowedAPKSigningKeys: e46f72ef28c79489cad0f1eee60cbf7fd3f29b5bff1bb1d82bab1e30427ff44f
+
+AutoUpdateMode: Version
+UpdateCheckMode: Tags
+CurrentVersion: 0.1.1
+CurrentVersionCode: 2

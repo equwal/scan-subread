@@ -2,3 +2,5 @@ dist/
 package-lock.json
 fixtures/*.srt
 android/
+# F-Droid tools format this recipe (fdroid rewritemeta).
+fdroid/

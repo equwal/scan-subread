@@ -1,0 +1,25 @@
+Scan SubRead is a PDF reader that follows the audiobook. It works with scans and with text PDFs. It is made for people who read and listen in a language that they learn.
+
+Load a PDF and the subtitle file (.srt) of its audiobook. The app reads the text of each page, aligns each subtitle line to it, and follows the player: it marks the line that the narrator reads and turns the page.
+
+<b>What it does</b>
+<ul>
+<li>Scans: OCR reads each page in the app, also Japanese, horizontal and vertical. Text PDFs: the app reads the text layer.</li>
+<li>Tap a word: the text from that word to the end of the line goes to the dictionary of your choice. The player pauses while the dictionary is open.</li>
+<li>Press a word for half a second: SubRead Anki makes a card with its sentence.</li>
+<li>"Make subtitles with SubRead": pick the audiobook, and SubRead makes the .srt from the audio and the text of the book.</li>
+<li>The app keeps the last book, its page and its subtitles, and opens them at the next start.</li>
+<li>After a page turn by hand, the page stops following. The Follow button brings it back.</li>
+</ul>
+
+<b>The SubRead suite</b>
+<ul>
+<li>SubRead Overlay reads the position of the audiobook player and gives it to this app.</li>
+<li>SubRead Dictionary, or another app in the text selection menu, looks up the words.</li>
+<li>SubRead makes the subtitle file.</li>
+<li>SubRead Anki makes the cards.</li>
+</ul>
+The start card shows which of these apps are installed.
+
+<b>Network</b>
+The first OCR run of a language downloads the language data of Tesseract from cdn.jsdelivr.net. The app keeps it after that. Nothing else leaves the device.
