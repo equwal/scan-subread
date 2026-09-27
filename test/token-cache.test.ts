@@ -172,6 +172,7 @@ describe('token cache', () => {
     expect(await cache.getPage(keys[2])).toBeUndefined();
   });
 
+  // 100 runs of IndexedDB work take about 2 s, and more than the 5 s default on a busy machine.
   it('clears each page key that starts with the book key and "|", and no other key', async () => {
     const cache = await freshCache();
     const separator = fc.constantFrom('|', '||', '}', '{', '', '￿');
@@ -188,7 +189,7 @@ describe('token cache', () => {
         }
       }),
     );
-  });
+  }, 30_000);
 
   it('works without IndexedDB, and warns once', async () => {
     const warn = vi.spyOn(console, 'warn').mockImplementation(() => undefined);

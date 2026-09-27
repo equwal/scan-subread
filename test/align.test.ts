@@ -196,8 +196,12 @@ describe('createAligner', () => {
   });
 });
 
+// The bounds leave room for a busy machine: the aligner takes about 1 s and
+// 30 ms here, and took 4.3 s once under heavy load. The old global diff took
+// 13 s for the full book, and the same again for each page, so the test still
+// catches a return to it.
 describe('createAligner speed', () => {
-  it('aligns a book of 300 000 characters in under 3 s, and one more page in under 100 ms', () => {
+  it('aligns a book of 300 000 characters in under 8 s, and one more page in under 500 ms', () => {
     const LENGTH = 300_000;
     const PAGE = 600;
     // 5% noise: 3 codes in 60 are a drop, a substitution and an insertion.
@@ -233,7 +237,7 @@ describe('createAligner speed', () => {
     const one = performance.now() - t;
 
     expect(spans.filter((s) => s.matched).length).toBeGreaterThanOrEqual(0.99 * cues.length);
-    expect(all).toBeLessThan(3000);
-    expect(one).toBeLessThan(100);
+    expect(all).toBeLessThan(8000);
+    expect(one).toBeLessThan(500);
   }, 30_000);
 });
