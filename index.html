@@ -55,14 +55,6 @@
           <path class="solid" d="M10 10v7l5.5-3.5z" />
         </svg>
       </button>
-      <button
-        id="follow-now"
-        aria-label="Follow the audio again"
-        title="Follow the audio again: go to its page"
-        hidden
-      >
-        Follow
-      </button>
     </header>
 
     <div id="strip">
@@ -171,6 +163,15 @@
           <div id="overlay"></div>
         </div>
       </div>
+      <!-- Over the page, not in the top bar: a button that shows must not move the others. -->
+      <button
+        id="follow-now"
+        aria-label="Follow the audio again"
+        title="Follow the audio again: go to its page"
+        hidden
+      >
+        Follow
+      </button>
     </main>
 
     <script type="module" src="/src/main.ts"></script>

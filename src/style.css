@@ -105,12 +105,26 @@ body {
   font-variant-numeric: tabular-nums;
 }
 
-/* The Follow button shows while a page turn by the user holds the follow. */
-#topbar #follow-now {
-  padding: 0 0.6rem;
+/*
+ * The Follow button shows while a page turn by the user holds the follow.
+ * It floats over the lower right corner of the page, so the buttons of the
+ * top bar stay where they are when it shows.
+ */
+#follow-now {
+  position: absolute;
+  right: 1rem;
+  bottom: calc(1rem + env(safe-area-inset-bottom, 0px));
+  z-index: 5;
+  min-height: 48px;
+  padding: 0 1.2rem;
+  font: inherit;
   font-weight: 600;
   color: #1a1a1a;
   background: var(--highlight-solid);
+  border: none;
+  border-radius: 24px;
+  box-shadow: 0 2px 8px #0006;
+  cursor: pointer;
 }
 
 #follow-note {
@@ -309,7 +323,9 @@ body.menu-open #panel {
   background: var(--highlight);
 }
 
+/* The frame of the Follow button. */
 #main {
+  position: relative;
   flex: 1;
   min-height: 0;
   display: flex;

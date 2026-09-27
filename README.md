@@ -125,12 +125,13 @@ text of the cue on it, then the next page.
 
 When you turn a page yourself (an arrow, a key, a swipe or the page
 jump), the follow holds: the page does not turn by itself, and a
-"Follow" button shows in the top bar. The mark still shows when the cue
-of now is on the page that you look at. The hold ends when you press
-"Follow", when the audio reaches the page that you look at, when you
-move the audio from the app (the cue list or "move the audio to this
-page"), or when the player jumps. A new alignment after a page is read
-does not end the hold.
+"Follow" button shows over the lower right corner of the page. It is not
+in the top bar, so the buttons there do not move. The mark still shows
+when the cue of now is on the page that you look at. The hold ends when
+you press "Follow", when the audio reaches the page that you look at,
+when you move the audio from the app (the cue list or "move the audio
+to this page"), or when the player jumps. A new alignment after a page
+is read does not end the hold.
 
 ### The top bar
 
