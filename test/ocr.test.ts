@@ -113,6 +113,20 @@ describe('createOcr', () => {
     expect(worker.terminate).toHaveBeenCalledTimes(1);
   }, 1000);
 
+  it('rejects the page that runs when the worker fails', async () => {
+    // tesseract.js does not settle a job when its Web Worker fails. The
+    // finding: after a crash of the worker, the reading waited for ever.
+    const worker = { ...fakeWorker(), worker: new EventTarget() };
+    worker.recognize.mockImplementation(() => new Promise(() => undefined));
+    createWorker.mockResolvedValue(worker);
+    const ocr = await createOcr('eng', () => undefined);
+    const page = ocr.recognize(fakeCanvas(), 0);
+    const event = new Event('error');
+    worker.worker.dispatchEvent(event);
+    await expect(page).rejects.toThrow('The OCR worker failed.');
+    await expect(page).rejects.toHaveProperty('cause', event);
+  }, 1000);
+
   it('gives the error of a page as it is, not as OcrStartError', async () => {
     createWorker.mockResolvedValue(fakeWorker());
     const ocr = await createOcr('eng', () => undefined);

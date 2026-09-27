@@ -172,6 +172,11 @@ tesseract.js first makes a PNG file, and on a test phone (Android
 WebView) that took about 13 s for each page. The PPM image takes
 milliseconds and has the same pixels, so OCR gives the same tokens.
 
+The OCR of a page can take 2 minutes, and more for a page of more than 4
+million pixels. When it takes longer, or when the OCR worker fails, the
+app stops the worker and counts the page as not read. The next page
+starts a new worker, so one bad page does not stop the reading.
+
 Both give the same tokens: one box per character with a line id and a
 word id. The alignment, the mark, the page turn and the lookup work the
 same way on a scan and on a text PDF.
@@ -465,8 +470,8 @@ in a browser bundle.
 - `src/token-cache.ts`: IndexedDB store for the page tokens, the copy of
   the last book and the meta data of each book (thin).
 - `src/ocr.ts`, `src/pdf.ts`: thin browser wrappers around the libraries.
-  `src/ocr-job.ts`: the start error and the stop of OCR, without
-  tesseract.js.
+  `src/ocr-job.ts`: the start error, the time limit of a page, the new
+  worker after a failed page and the stop of OCR, without tesseract.js.
 - `src/view.ts`: the page view: render to fit the width, draw the mark,
   scroll to it, render again on a resize.
 - `src/nav.ts`: page turns by the user: the arrows, the keys, the swipe

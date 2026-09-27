@@ -47,8 +47,7 @@ import {
   type Message,
 } from './messages';
 import { setupNav } from './nav';
-import type { Ocr } from './ocr';
-import { OcrStartError, stopOcr } from './ocr-job';
+import { createOcrJob, OcrStartError, pageTimeLimit, type OcrJob } from './ocr-job';
 import { defaultRtl } from './paging';
 import type { PdfDoc } from './pdf';
 import { nextPage } from './read-order';
@@ -525,7 +524,8 @@ function watchDb(): void {
 /**
  * The tokens of one page: from the cache, else the text layer, else OCR.
  * `force` skips the text layer. Rejects with OcrStartError when the page
- * needs OCR and OCR cannot start.
+ * needs OCR and OCR cannot start, and with OcrTimeoutError when the OCR of
+ * the page takes too long.
  */
 async function readPage(
   pdf: PdfDoc,
@@ -533,7 +533,7 @@ async function readPage(
   page: number,
   lang: string,
   force: boolean,
-  ocr: () => Promise<Ocr>,
+  ocr: OcrJob<HTMLCanvasElement>,
 ): Promise<PageEntry> {
   if (!force) {
     const cached = await getPage(pageKey(file, page, lang, 'text'));
@@ -550,16 +550,16 @@ async function readPage(
     }
   }
   // OCR starts before the render: when it cannot start, no page is rendered for nothing.
-  const engine = await ocr();
+  await ocr.start();
   const canvas = await pdf.renderPage(page, OCR_WIDTH);
-  const tokens = await engine.recognize(canvas, page);
+  const tokens = await ocr.recognize(canvas, page, pageTimeLimit(canvas.width * canvas.height));
   const entry: PageEntry = { tokens, width: canvas.width, height: canvas.height, source: 'ocr' };
   await putPage(pageKey(file, page, lang, 'ocr'), entry);
   return entry;
 }
 
 /** The OCR of the reading that runs now. */
-let readingOcr: { started?: Promise<Ocr> } = {};
+let readingOcr: OcrJob<HTMLCanvasElement> | undefined;
 
 /**
  * Reads every page of the book: the current page first, then the pages
@@ -576,9 +576,7 @@ async function readBook(retry = false): Promise<void> {
   const seq = ++state.readSeq;
   // The OCR of the reading before stops at once. It does not finish its
   // page: two quick changes of a setting ran two OCR jobs at the same time.
-  stopOcr(readingOcr.started);
-  const ocr: { started?: Promise<Ocr> } = {};
-  readingOcr = ocr;
+  readingOcr?.stop();
   if (!retry) {
     state.pages = [];
     state.tokens = [];
@@ -605,16 +603,18 @@ async function readBook(retry = false): Promise<void> {
       setReading(readingText(read(), total, `page ${page + 1}: OCR ${Math.round(p * 100)}%`));
     }
   };
-  // The OCR worker, and tesseract.js itself, load on the first page that needs them.
-  const getOcr = (): Promise<Ocr> => {
-    ocr.started ??= import('./ocr').then(
+  // The OCR worker, and tesseract.js itself, load on the first page that
+  // needs them. After a page that fails or takes too long, the job stops
+  // the worker, and the next page starts a new one.
+  const ocr = createOcrJob<HTMLCanvasElement>(() =>
+    import('./ocr').then(
       ({ createOcr }) => createOcr(lang, onOcrProgress),
       (err: unknown) => {
         throw new OcrStartError(err);
       },
-    );
-    return ocr.started;
-  };
+    ),
+  );
+  readingOcr = ocr;
   try {
     while (pending.size > 0) {
       page = nextPage(pending, state.currentPage);
@@ -622,7 +622,7 @@ async function readBook(retry = false): Promise<void> {
       setReading(readingText(read(), total, `page ${page + 1}`));
       let entry: PageEntry;
       try {
-        entry = await readPage(pdf, file, page, lang, force, getOcr);
+        entry = await readPage(pdf, file, page, lang, force, ocr);
       } catch (err) {
         if (seq !== state.readSeq) return; // Another book or another setting took over.
         failed++;
@@ -655,7 +655,7 @@ async function readBook(retry = false): Promise<void> {
   } catch (err) {
     if (seq === state.readSeq) say(`Cannot read the pages: ${String(err)}`);
   } finally {
-    stopOcr(ocr.started);
+    ocr.stop();
     if (seq === state.readSeq) setReading(readingEndMessage(failed, startFailed));
   }
 }

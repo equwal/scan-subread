@@ -20,7 +20,7 @@ import { imageToPpm } from './ppm';
 export { OcrStartError };
 
 export interface Ocr {
-  /** Rejects when the OCR stops before the page is read. */
+  /** Rejects when the OCR stops, or its worker fails, before the page is read. */
   recognize(image: HTMLCanvasElement, pageIndex: number): Promise<OcrToken[]>;
   terminate(): Promise<void>;
 }
@@ -45,15 +45,18 @@ export async function createOcr(lang: string, onProgress: (p: number) => void): 
       throw new OcrStartError(err);
     }
   }
-  // tesseract.js does not settle a job that runs when its worker stops. So
-  // each page also waits for the stop, and the reading does not wait for
-  // ever for a page of a stopped worker.
+  // tesseract.js does not settle a job that runs when its worker stops or
+  // fails. So each page also waits for the stop and for an error event of
+  // the worker, and the reading does not wait for ever for such a page.
   let stop: (reason: Error) => void = () => undefined;
   const stopped = new Promise<never>((_resolve, reject) => {
     stop = reject;
   });
   // A stop while no page runs is no error.
   stopped.catch(() => undefined);
+  webWorker(worker)?.addEventListener('error', (event) => {
+    stop(new Error('The OCR worker failed.', { cause: event }));
+  });
   return {
     async recognize(canvas, pageIndex) {
       const page = worker
@@ -66,6 +69,15 @@ export async function createOcr(lang: string, onProgress: (p: number) => void): 
       await worker.terminate();
     },
   };
+}
+
+/**
+ * The Web Worker of a tesseract.js worker, for its error event. tesseract.js
+ * keeps it in the property `worker`, which its types do not list.
+ */
+function webWorker(worker: TesseractWorker): EventTarget | undefined {
+  const inner: unknown = 'worker' in worker ? worker.worker : undefined;
+  return inner instanceof EventTarget ? inner : undefined;
 }
 
 /**
