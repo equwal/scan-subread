@@ -88,27 +88,31 @@ export function createOcrJob<Image>(
   startLimitMs = START_LIMIT_MS,
 ): OcrJob<Image> {
   let running: Promise<OcrWorker<Image>> | undefined;
-  /** The control of the start that runs now, if any. */
-  let starting: AbortController | undefined;
+  /** Cuts off the start that runs now, if any. */
+  let cutStart: ((reason: Error) => void) | undefined;
   let stopped = false;
 
   function startInTime(): Promise<OcrWorker<Image>> {
     const control = new AbortController();
-    starting = control;
     const started = startWorker(control.signal);
-    let timer: ReturnType<typeof setTimeout> | undefined;
+    // The start rejects with the reason itself: AbortSignal.reason needs
+    // WebView 98, and the app runs on WebView 91 and later.
+    let cutOff: (reason: Error) => void = () => undefined;
     const cut = new Promise<never>((_resolve, reject) => {
-      control.signal.addEventListener('abort', () => reject(control.signal.reason), {
-        once: true,
-      });
-      timer = setTimeout(() => {
-        const s = Math.round(startLimitMs / 1000);
-        control.abort(new OcrStartError(new Error(`The start took more than ${s} s.`)));
-      }, startLimitMs);
+      cutOff = (reason) => {
+        reject(reason);
+        control.abort(reason);
+      };
     });
+    cutStart = cutOff;
+    const s = Math.round(startLimitMs / 1000);
+    const timer = setTimeout(
+      () => cutOff(new OcrStartError(new Error(`The start took more than ${s} s.`))),
+      startLimitMs,
+    );
     const end = (): void => {
       clearTimeout(timer);
-      if (starting === control) starting = undefined;
+      if (cutStart === cutOff) cutStart = undefined;
     };
     return Promise.race([started, cut]).then(
       (ocr) => {
@@ -156,7 +160,7 @@ export function createOcrJob<Image>(
     },
     stop() {
       stopped = true;
-      starting?.abort(new Error('OCR stopped.'));
+      cutStart?.(new Error('OCR stopped.'));
       stopOcr(running);
       running = undefined;
     },

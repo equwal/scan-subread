@@ -209,6 +209,26 @@ describe('createOcrJob', () => {
     expect(vi.getTimerCount()).toBe(0);
   });
 
+  it('gives the start error also where abort() keeps no reason (WebView before 98)', async () => {
+    // abort(reason) and AbortSignal.reason came in Chrome 98. The SIMD core of
+    // the app runs from WebView 91.
+    const abort = AbortController.prototype.abort;
+    const noReason = vi.spyOn(AbortController.prototype, 'abort').mockImplementation(function (
+      this: AbortController,
+    ) {
+      abort.call(this);
+    });
+    try {
+      const { start } = stalledStart();
+      const job = createOcrJob(start, 1000);
+      const started = job.start().catch((e: unknown) => e);
+      await vi.advanceTimersByTimeAsync(1000);
+      expect(await started).toBeInstanceOf(OcrStartError);
+    } finally {
+      noReason.mockRestore();
+    }
+  });
+
   it('stops a worker that starts after the start limit', async () => {
     const worker = fakeWorker(readPage);
     const start = vi.fn(
