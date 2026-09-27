@@ -9,8 +9,21 @@ import { App } from '@capacitor/app';
 import { createAligner, shiftSpans, type Aligner, type OcrToken, type TokenSpan } from './align';
 import { ankiCard, cardSource } from './anki-card';
 import { backStep, keepScreenOn } from './app-state';
-import { beginOpen, createOpens, endOpen, subtitlesOwner, userOpened } from './book-open';
-import { resultName, srtName, subreadConcerns, subtitlesOnOpen } from './book-subtitles';
+import {
+  beginOpen,
+  createOpens,
+  endOpen,
+  failureShows,
+  subtitlesOwner,
+  userOpened,
+} from './book-open';
+import {
+  keepMakeStatus,
+  resultName,
+  srtName,
+  subreadConcerns,
+  subtitlesOnOpen,
+} from './book-subtitles';
 import { bookText } from './book-text';
 import { LocalAudioClock, OverlayClock, type ClockSource, type ClockState } from './clock-source';
 import { audioPage, cueParts, cueProgress, pageStartTime, type CueParts } from './cue-pages';
@@ -308,33 +321,40 @@ ui.pdfFile.addEventListener('change', () => {
 /** The attempts to open a book, and the attempt of the book that is open. */
 const opens = createOpens();
 
+/** The restore of the last book: its meta data, and opens.byUser when the restore started. */
+interface Restore {
+  meta: BookMeta;
+  since: number;
+}
+
 /**
  * Opens `file` as the book. The book that is open stays until the new
  * file loads: a file that is not a PDF, or is damaged, changes nothing.
  *
- * `meta` is what the reader keeps for the book, when the caller has it:
- * the book opens at its page. Only the restore of the last book gives it,
- * so an open without it is a file that the user picked. Else the meta data
- * comes from IndexedDB after the open. The page shows and the reading
- * starts at once, and the meta data applies when it comes: an upgrade of
- * the database can hold IndexedDB for many seconds. Gives true when the new
- * book is open.
+ * `restore` comes from the restore of the last book: the book opens at the
+ * page of its meta data. An open without it is a file that the user
+ * picked, and its meta data comes from IndexedDB after the open. The page
+ * shows and the reading starts at once, and the meta data applies when it
+ * comes: an upgrade of the database can hold IndexedDB for many seconds.
+ * Gives true when the new book is open.
  */
-async function openBook(file: File, meta?: BookMeta): Promise<boolean> {
-  if (file.size === 0) {
-    say(EMPTY_FILE_TEXT);
+async function openBook(file: File, restore?: Restore): Promise<boolean> {
+  const meta = restore?.meta;
+  const attempt = beginOpen(opens, restore === undefined);
+  /** Ends the attempt that failed. The strip shows `text` only when failureShows allows it. */
+  const fail = (text: string): false => {
+    endOpen(opens, attempt, false);
+    claimSubtitles();
+    if (failureShows(opens, attempt, restore?.since)) say(text);
     return false;
-  }
-  const attempt = beginOpen(opens, meta === undefined);
+  };
+  if (file.size === 0) return fail(EMPTY_FILE_TEXT);
   let bytes: ArrayBuffer;
   try {
     bytes = await file.arrayBuffer();
   } catch (err) {
-    endOpen(opens, attempt, false);
-    claimSubtitles();
     // The copy of the last book is gone, for example after the storage was cleared.
-    say(meta ? LAST_BOOK_GONE_TEXT : `Cannot read ${file.name}: ${String(err)}`);
-    return false;
+    return fail(restore ? LAST_BOOK_GONE_TEXT : `Cannot read ${file.name}: ${String(err)}`);
   }
   let pdf: PdfDoc;
   try {
@@ -342,10 +362,7 @@ async function openBook(file: File, meta?: BookMeta): Promise<boolean> {
     const { loadPdf } = await import('./pdf');
     pdf = await loadPdf(bytes);
   } catch (err) {
-    endOpen(opens, attempt, false);
-    claimSubtitles();
-    say(pdfOpenText(err));
-    return false;
+    return fail(pdfOpenText(err));
   }
   // A file that the user picked later is open already.
   if (!endOpen(opens, attempt, true)) {
@@ -374,11 +391,12 @@ async function openBook(file: File, meta?: BookMeta): Promise<boolean> {
   }
   claimSubtitles();
   const subtitlesSeq = state.subtitlesSeq;
-  // A SubRead job that waits for the pages of another book does not start.
-  if (state.makeWait && state.makeWait.book !== key) {
-    state.makeWait = null;
+  // The SubRead status of the book before goes, unless a job runs.
+  if (!keepMakeStatus(key, state.making, state.makeWait?.book ?? null)) {
     ui.makeStatus.textContent = '';
   }
+  // A SubRead job that waits for the pages of another book does not start.
+  if (state.makeWait && state.makeWait.book !== key) state.makeWait = null;
   setForceOcr(meta?.forceOcr ?? false);
   ui.forceOcr.disabled = false;
   ui.clearBook.disabled = false;
@@ -503,7 +521,7 @@ async function restoreLastBook(): Promise<void> {
     showStart();
     return;
   }
-  if (await openBook(file, meta)) return;
+  if (await openBook(file, { meta, since })) return;
   // The copy cannot be read, or it is no PDF now: forget it. After an open
   // by the user, the copy can be of the user's book, so it stays.
   if (!userOpened(opens, since)) await clearLastBook(bookKey(file));

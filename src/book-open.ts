@@ -70,3 +70,15 @@ export function subtitlesOwner(o: Opens, book: string | null): string | null {
 export function userOpened(o: Opens, since: number): boolean {
   return o.byUser !== since;
 }
+
+/**
+ * True when the strip may tell why the attempt `attempt` failed: no later
+ * attempt shows a book. For the restore of the last book, `since` is
+ * o.byUser when the restore started, and the error shows only when the user
+ * started no open after that: the user's book tells its own state. Before,
+ * "This file is not a PDF, or it is damaged." of an older pick showed over
+ * the good book that the user picked after it.
+ */
+export function failureShows(o: Opens, attempt: number, since?: number): boolean {
+  return attempt > o.shown && (since === undefined || !userOpened(o, since));
+}

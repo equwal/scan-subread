@@ -4,11 +4,56 @@ import {
   beginOpen,
   createOpens,
   endOpen,
+  failureShows,
   opening,
   subtitlesOwner,
   userOpened,
   type Opens,
 } from '../src/book-open';
+
+describe('failureShows', () => {
+  it('does not say the error of an older pick over the book that shows', () => {
+    // The finding: the user picks a large file A that is no PDF, then B. B
+    // shows first. Then A fails, and the strip said "This file is not a
+    // PDF, or it is damaged." over the good book B.
+    const o = createOpens();
+    const a = beginOpen(o, true);
+    const b = beginOpen(o, true);
+    expect(endOpen(o, b, true)).toBe(true);
+    expect(endOpen(o, a, false)).toBe(false);
+    expect(failureShows(o, a)).toBe(false);
+  });
+
+  it('says the error of a pick when no later pick shows', () => {
+    const o = createOpens();
+    const a = beginOpen(o, true);
+    endOpen(o, a, false);
+    expect(failureShows(o, a)).toBe(true);
+    // B still loads when A fails. When B shows, its message replaces the error.
+    const c = beginOpen(o, true);
+    beginOpen(o, true);
+    endOpen(o, c, false);
+    expect(failureShows(o, c)).toBe(true);
+  });
+
+  it('does not say the error of the restore after an open of the user', () => {
+    const o = createOpens();
+    const since = o.byUser;
+    const l = beginOpen(o, false);
+    beginOpen(o, true);
+    endOpen(o, l, false);
+    // The book of the user still loads, and it shows its own message.
+    expect(failureShows(o, l, since)).toBe(false);
+  });
+
+  it('says the error of the restore when the user opened nothing', () => {
+    const o = createOpens();
+    const since = o.byUser;
+    const l = beginOpen(o, false);
+    endOpen(o, l, false);
+    expect(failureShows(o, l, since)).toBe(true);
+  });
+});
 
 /** One step of a script of opens: start the next attempt, or end one that loads. */
 interface Step {
