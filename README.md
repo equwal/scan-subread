@@ -370,7 +370,9 @@ Notes:
 - The pdf.js worker is part of the bundle.
 - Pinch zoom is on (`zoomEnabled` in `capacitor.config.ts`). The page
   fits the screen width in each orientation, up to 1000 CSS pixels, and
-  it renders again at the resolution of the screen after a rotation.
+  it renders again at the resolution of the screen after a rotation, and
+  at the zoom 0.3 s after a pinch zoom stops, so the text stays sharp.
+  The canvas is at most 4096 pixels wide and 12 million pixels in area.
   Zoom in and scroll to read small print. On a zoomed page a swipe moves
   the page and does not turn it.
 - The pages, the copy of the last book and the meta data of each book
@@ -436,6 +438,8 @@ in a browser bundle.
 - `src/paging.ts`: pure page turns from keys, swipes and the arrows, the
   page jump, the reading direction, and the limits of the long press.
 - `src/scroll.ts`: pure scroll position that brings the mark into view.
+- `src/render-size.ts`: pure width of the canvas of a page, for the
+  screen and the pinch zoom.
 - `src/messages.ts`: pure texts of the status strip.
 - `src/read-order.ts`: pure order in which the pages are read.
 - `src/book-text.ts`: pure tokens to the book text for SubRead.

@@ -1,13 +1,17 @@
 // The page view. It renders a page to fit the width of the viewer, draws
 // the boxes of the mark, keeps the mark in view, and renders the page
-// again when the width of the viewer changes.
+// again when the width of the viewer or the pinch zoom changes.
 
 import type { Box } from './line-boxes';
 import type { PdfDoc } from './pdf';
+import { renderWidth } from './render-size';
 import { scrollTarget, type Extent } from './scroll';
 
-/** The widest canvas, in device pixels. It limits the memory of one page. */
-const MAX_RENDER = 2048;
+/** The height of a page divided by its width before the first render: A4. */
+const DEFAULT_ASPECT = 842 / 595;
+
+/** Milliseconds after the last change of the pinch zoom before the page renders again. */
+const ZOOM_MS = 300;
 
 /** The least space around a box of the mark, in CSS pixels. See padBox in line-boxes.ts. */
 const BOX_PAD = 2;
@@ -55,13 +59,28 @@ export function createPageView(
   let pdf: PdfDoc | null = null;
   /** The page to show. */
   let index = -1;
-  /** The page on the canvas, and the size that it was rendered for. */
-  let shown = { pdf: null as PdfDoc | null, index: -1, cssWidth: 0, dpr: 0 };
+  /** The page on the canvas, and the width of the canvas in device pixels. */
+  let shown = { pdf: null as PdfDoc | null, index: -1, width: 0 };
   let seq = 0;
   let autoUntil = 0;
   let userAt = -Infinity;
 
   const canvas = (): HTMLCanvasElement | null => ui.page.querySelector('canvas');
+
+  /**
+   * The width of the canvas for the page now: sharp for the screen and the
+   * pinch zoom, within the limits of renderWidth. The shape of the page on
+   * the canvas stands for the shape of the next page.
+   */
+  function targetWidth(): number {
+    const c = canvas();
+    return renderWidth({
+      cssWidth: ui.page.clientWidth,
+      dpr: window.devicePixelRatio || 1,
+      zoom: window.visualViewport?.scale ?? 1,
+      aspect: c && c.width > 0 ? c.height / c.width : DEFAULT_ASPECT,
+    });
+  }
 
   /** Draws the boxes of the mark. Gives their extent in the scroll space of the viewer, or null. */
   function draw(): Extent | null {
@@ -114,9 +133,7 @@ export function createPageView(
     if (!doc || index < 0) return;
     const my = ++seq;
     const at = index;
-    const cssWidth = ui.page.clientWidth;
-    const dpr = window.devicePixelRatio || 1;
-    const width = Math.round(Math.min(MAX_RENDER, Math.max(300, cssWidth * dpr)));
+    const width = targetWidth();
     const c = await doc.renderPage(at, width);
     if (my !== seq) return; // A newer render replaced this one.
     const turn = doc !== shown.pdf || at !== shown.index;
@@ -125,7 +142,7 @@ export function createPageView(
     autoUntil = performance.now() + AUTO_SCROLL_MS;
     canvas()?.remove();
     ui.page.prepend(c);
-    shown = { pdf: doc, index: at, cssWidth, dpr };
+    shown = { pdf: doc, index: at, width };
     const extent = draw();
     const v = ui.viewer;
     if (turn) {
@@ -159,20 +176,20 @@ export function createPageView(
     );
   }
 
-  // Render again when the width of the page changes, for example after a
-  // rotation. The canvas stretches at once. The new render makes it sharp.
+  // Render again when the canvas needs another width: after a rotation, or
+  // when a pinch zoom settles. The canvas stretches at once. The new render
+  // makes it sharp. The marks are in page pixels, so they stay correct.
   let resizeTimer: ReturnType<typeof setTimeout> | undefined;
-  new ResizeObserver(() => {
+  function renderAgainSoon(ms: number): void {
     clearTimeout(resizeTimer);
     resizeTimer = setTimeout(() => {
-      const dpr = window.devicePixelRatio || 1;
-      const width = ui.page.clientWidth;
-      if (width > 0 && (Math.abs(width - shown.cssWidth) >= 1 || dpr !== shown.dpr)) {
-        // A render of a closed document fails. The stretched canvas stays.
-        render().catch(() => undefined);
-      }
-    }, RESIZE_MS);
-  }).observe(ui.viewer);
+      if (shown.index < 0 || ui.page.clientWidth === 0 || targetWidth() === shown.width) return;
+      // A render of a closed document fails. The stretched canvas stays.
+      render().catch(() => undefined);
+    }, ms);
+  }
+  new ResizeObserver(() => renderAgainSoon(RESIZE_MS)).observe(ui.viewer);
+  window.visualViewport?.addEventListener('resize', () => renderAgainSoon(ZOOM_MS));
 
   return {
     show(doc, i) {
