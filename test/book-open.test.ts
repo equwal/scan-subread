@@ -5,11 +5,51 @@ import {
   createOpens,
   endOpen,
   failureShows,
+  lateMeta,
   opening,
   subtitlesOwner,
   userOpened,
   type Opens,
 } from '../src/book-open';
+
+describe('lateMeta', () => {
+  const none = { page: false, forceOcr: false };
+
+  it('does not undo "Force OCR" that the user set before the meta data came', () => {
+    // The finding: the user opens B and ticks Force OCR before the meta data
+    // of B comes. The meta data set Force OCR back, and the reading started
+    // again without it, while the store said on.
+    expect(lateMeta({}, { page: false, forceOcr: true })).toEqual({});
+    expect(lateMeta({ forceOcr: false }, { page: false, forceOcr: true })).toEqual({});
+  });
+
+  it('does not go to the saved page after a page turn', () => {
+    expect(lateMeta({ page: 57 }, { page: true, forceOcr: false })).toEqual({ forceOcr: false });
+  });
+
+  it('applies each field that did not change', () => {
+    expect(lateMeta({ page: 57, forceOcr: true }, none)).toEqual({ page: 57, forceOcr: true });
+    // Without a saved setting, Force OCR is off. Without a saved page, the page stays.
+    expect(lateMeta({}, none)).toEqual({ forceOcr: false });
+  });
+
+  it('gives exactly the fields that did not change, with their saved values', () => {
+    const meta = fc.record(
+      { page: fc.nat({ max: 500 }), forceOcr: fc.boolean() },
+      { requiredKeys: [] },
+    );
+    const changes = fc.record({ page: fc.boolean(), forceOcr: fc.boolean() });
+    fc.assert(
+      fc.property(meta, changes, (m, changed) => {
+        const late = lateMeta(m, changed);
+        expect('page' in late).toBe(!changed.page && m.page !== undefined);
+        if ('page' in late) expect(late.page).toBe(m.page);
+        expect('forceOcr' in late).toBe(!changed.forceOcr);
+        if ('forceOcr' in late) expect(late.forceOcr).toBe(m.forceOcr ?? false);
+      }),
+    );
+  });
+});
 
 describe('failureShows', () => {
   it('does not say the error of an older pick over the book that shows', () => {

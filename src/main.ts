@@ -14,8 +14,10 @@ import {
   createOpens,
   endOpen,
   failureShows,
+  lateMeta,
   subtitlesOwner,
   userOpened,
+  type Changes,
 } from './book-open';
 import {
   keepMakeStatus,
@@ -186,6 +188,8 @@ const state = {
   dbSlow: false,
   /** "Force OCR" of the open book: the reading skips the text layer. */
   forceOcr: false,
+  /** What changed after the open of the book. Its meta data does not undo it (lateMeta). */
+  changed: { page: false, forceOcr: false } as Changes,
   /** A SubRead job that waits until all pages of its book are read. */
   makeWait: null as { audio: { uri: string; name: string }; book: string } | null,
   /** The book of the SubRead job that runs, or null. */
@@ -283,6 +287,8 @@ ui.lang.addEventListener('change', () => {
 ui.forceOcr.addEventListener('change', () => {
   const book = state.book;
   if (book === null) return;
+  // Meta data of the book that comes later does not undo this (lateMeta).
+  state.changed.forceOcr = true;
   setForceOcr(ui.forceOcr.checked);
   void putMeta(book, { forceOcr: state.forceOcr });
   void readBook();
@@ -384,6 +390,7 @@ async function openBook(file: File, restore?: Restore): Promise<boolean> {
   state.activeCue = -1;
   state.markedCue = -1;
   state.held = false;
+  state.changed = { page: false, forceOcr: false };
   // The subtitles of another book go at once. Subtitles of no book, loaded
   // while no book was open or while this book loaded, are for this book.
   if (state.subtitles && state.subtitlesBook !== null && state.subtitlesBook !== key) {
@@ -407,7 +414,9 @@ async function openBook(file: File, restore?: Restore): Promise<boolean> {
   if (state.clock) showPlayerStatus(state.clock);
   say(pdfLoadedText(pdf.numPages));
   // showPage sets the current page at once, so the reading starts there.
-  void showPage(validPage(meta?.page, pdf.numPages) ?? 0);
+  // This page is the saved page, or page 1 until the meta data comes: no
+  // save, so page 1 does not go over the saved page of the book.
+  void showPage(validPage(meta?.page, pdf.numPages) ?? 0, false);
   // readBook stops the reading of the old book before its document closes.
   void readBook();
   void old?.destroy();
@@ -431,20 +440,19 @@ function validPage(page: number | undefined, pages: number): number | undefined 
 /**
  * Applies the meta data of the book that open attempt `attempt` opened.
  * `subtitlesSeq` is the count of subtitle loads at the open: subtitles
- * that the user loaded after the open stay. The page applies only while
- * the first page shows, so a page turn after the open stays.
+ * that the user loaded after the open stay. A page turn and a change of
+ * "Force OCR" after the open stay too (lateMeta).
  */
 function applyMeta(meta: BookMeta, attempt: number, subtitlesSeq: number): void {
   const key = state.book;
   const pdf = state.pdf;
   if (attempt !== opens.shown || key === null || !pdf) return;
-  const page = validPage(meta.page, pdf.numPages);
-  if (page !== undefined && page !== state.currentPage && state.currentPage === 0) {
-    void showPage(page);
-  }
-  const forceOcr = meta.forceOcr ?? false;
-  if (forceOcr !== state.forceOcr) {
-    setForceOcr(forceOcr);
+  const late = lateMeta(meta, state.changed);
+  const page = validPage(late.page, pdf.numPages);
+  // The saved page needs no new save.
+  if (page !== undefined && page !== state.currentPage) void showPage(page, false);
+  if (late.forceOcr !== undefined && late.forceOcr !== state.forceOcr) {
+    setForceOcr(late.forceOcr);
     void readBook();
   }
   if (state.subtitlesSeq === subtitlesSeq) {
@@ -1287,12 +1295,21 @@ function marks(index: number): Marks | null {
   };
 }
 
-async function showPage(index: number): Promise<void> {
+/**
+ * Shows page `index`. `save` is true for a page turn by the user or by the
+ * follow: the page goes to the meta data of the book soon, and the meta
+ * data that comes later does not turn the page back (lateMeta). The page
+ * of the open and the saved page need no save.
+ */
+async function showPage(index: number, save = true): Promise<void> {
   const pdf = state.pdf;
   if (!pdf || index < 0 || index >= pdf.numPages) return;
   state.currentPage = index;
   nav.update();
-  savePageSoon();
+  if (save) {
+    state.changed.page = true;
+    savePageSoon();
+  }
   try {
     await view.show(pdf, index);
   } catch (err) {

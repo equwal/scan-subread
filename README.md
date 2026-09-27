@@ -71,6 +71,9 @@ second after it changes.
 The first start after an upgrade from a build with the old dictionary
 can take long: the upgrade deletes about 86 MB of dictionary data. The
 strip then says "Updating the page cache...", and the start card shows.
+A book that you open in that time shows at once, and its meta data
+applies when it comes. A page turn or a change of "Force OCR" that you
+make before then stays.
 
 ### Android: Back, the screen and the suite
 

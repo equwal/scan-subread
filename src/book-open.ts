@@ -1,5 +1,8 @@
 // The open of a book: the open attempts, the owner of subtitles that load
-// during an open, and the restore of the last book. Pure: no DOM.
+// during an open, the restore of the last book, the error of a failed
+// attempt, and the meta data that comes after the open. Pure: no DOM.
+
+import type { BookMeta } from './token-cache';
 
 /**
  * The open attempts of books. Each attempt gets the next number: 1, 2, 3 ...
@@ -81,4 +84,26 @@ export function userOpened(o: Opens, since: number): boolean {
  */
 export function failureShows(o: Opens, attempt: number, since?: number): boolean {
   return attempt > o.shown && (since === undefined || !userOpened(o, since));
+}
+
+/** What changed after the open of a book, before its meta data came. */
+export interface Changes {
+  /** A page turn: by the user, or by the follow of the audio. */
+  page: boolean;
+  /** A change of "Force OCR" by the user. */
+  forceOcr: boolean;
+}
+
+/**
+ * The fields of the meta data of a book that apply when the meta data comes
+ * after the open: each field that did not change after the open. A field
+ * that is not in the result does not apply. Without a saved setting, "Force
+ * OCR" is off. The upgrade of the database can hold the meta data for many
+ * seconds, and before, it set "Force OCR" back after the user ticked it.
+ */
+export function lateMeta(meta: BookMeta, changed: Changes): { page?: number; forceOcr?: boolean } {
+  const late: { page?: number; forceOcr?: boolean } = {};
+  if (!changed.page && meta.page !== undefined) late.page = meta.page;
+  if (!changed.forceOcr) late.forceOcr = meta.forceOcr ?? false;
+  return late;
 }
