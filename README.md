@@ -388,6 +388,22 @@ Install it on a connected phone with USB debugging on:
 adb install -r android/app/build/outputs/apk/debug/app-debug.apk
 ```
 
+A release APK gets the key of the SubRead suite from two environment
+variables: `SUBREAD_KEYSTORE_FILE` (the key store, key alias `subread`)
+and `SUBREAD_KEYSTORE_PASSWORD`. The key never goes into the repository.
+Without the two variables, the release build is not signed. Increase
+`versionCode` in `android/app/build.gradle` for each release. Build it
+in `android/`:
+
+```bash
+.\gradlew.bat assembleRelease
+```
+
+The APK lands at `android/app/build/outputs/apk/release/app-release.apk`.
+A release has an annotated tag `vX.Y.Z`, the title "Scan SubRead X.Y.Z"
+and the asset `Scan-SubRead-X.Y.Z.apk`, the same as the other apps of the
+suite.
+
 Notes:
 
 - The WebView serves the app from `https://localhost`. The file fields

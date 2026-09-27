@@ -1,5 +1,10 @@
 apply plugin: 'com.android.application'
 
+// Release signing comes from the environment, so the key never lives in the repository.
+def keystorePath = System.getenv("SUBREAD_KEYSTORE_FILE")
+def keystorePassword = System.getenv("SUBREAD_KEYSTORE_PASSWORD")
+def signingReady = keystorePath && keystorePassword && file(keystorePath).isFile()
+
 android {
     namespace = "com.equwal.scansubread"
     compileSdk = rootProject.ext.compileSdkVersion
@@ -7,8 +12,9 @@ android {
         applicationId "com.equwal.scansubread"
         minSdkVersion rootProject.ext.minSdkVersion
         targetSdkVersion rootProject.ext.targetSdkVersion
+        // versionCode must increase with each release.
         versionCode 1
-        versionName "1.0"
+        versionName "0.1.0"
         testInstrumentationRunner "androidx.test.runner.AndroidJUnitRunner"
         aaptOptions {
              // Files and dirs to omit from the packaged assets dir, modified to accommodate modern web apps.
@@ -16,10 +22,21 @@ android {
             ignoreAssetsPattern = '!.svn:!.git:!.ds_store:!*.scc:.*:!CVS:!thumbs.db:!picasa.ini:!*~'
         }
     }
+    if (signingReady) {
+        signingConfigs {
+            release {
+                storeFile file(keystorePath)
+                storePassword keystorePassword
+                keyAlias "subread"
+                keyPassword keystorePassword
+            }
+        }
+    }
     buildTypes {
         release {
             minifyEnabled false
             proguardFiles getDefaultProguardFile('proguard-android.txt'), 'proguard-rules.pro'
+            if (signingReady) signingConfig signingConfigs.release
         }
     }
 }
