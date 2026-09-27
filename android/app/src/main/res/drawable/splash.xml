@@ -1,0 +1,10 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- The window background while the web app loads: the app icon on white. -->
+<layer-list xmlns:android="http://schemas.android.com/apk/res/android">
+    <item android:drawable="@android:color/white" />
+    <item
+        android:width="144dp"
+        android:height="144dp"
+        android:drawable="@drawable/icon"
+        android:gravity="center" />
+</layer-list>
