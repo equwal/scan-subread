@@ -4,7 +4,9 @@
   --highlight: rgba(255, 200, 0, 0.45);
   --highlight-solid: rgb(255, 200, 0);
   --highlight-weak: rgba(120, 160, 255, 0.35);
-  --topbar: 2.75rem;
+  --topbar: 3.25rem;
+  /* The size of a button of the top bar: 48 CSS px, the Android guideline for a touch target. */
+  --target: 3rem;
   --panel-width: 22rem;
 }
 
@@ -23,13 +25,16 @@ body {
   overflow: hidden;
 }
 
-/* The top bar fits a phone of 360 CSS pixels: small icon buttons, no text labels. */
+/*
+ * The top bar fits a phone of 360 CSS pixels in one row: five icon buttons
+ * of 48 px, and the page label in the free space.
+ */
 #topbar {
   flex: none;
   box-sizing: border-box;
   height: var(--topbar);
   display: flex;
-  gap: 2px;
+  gap: 4px;
   align-items: center;
   padding: 0 4px;
   border-bottom: 1px solid #8884;
@@ -38,8 +43,8 @@ body {
 #topbar button {
   flex: none;
   box-sizing: border-box;
-  height: 2.25rem;
-  min-width: 2.25rem;
+  height: var(--target);
+  min-width: var(--target);
   padding: 0 0.3rem;
   display: inline-flex;
   align-items: center;
@@ -73,8 +78,8 @@ body {
 }
 
 #topbar svg {
-  width: 1.35rem;
-  height: 1.35rem;
+  width: 1.5rem;
+  height: 1.5rem;
   fill: none;
   stroke: currentColor;
   stroke-width: 2;
@@ -137,7 +142,7 @@ body {
   min-width: 0;
   width: 4rem;
   box-sizing: border-box;
-  height: 2.25rem;
+  height: var(--target);
   padding: 0 0.4rem;
   font: inherit;
   font-size: 1rem;
