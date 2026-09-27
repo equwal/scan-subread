@@ -9,7 +9,7 @@ import { scrollTarget, type Extent } from './scroll';
 /** The widest canvas, in device pixels. It limits the memory of one page. */
 const MAX_RENDER = 2048;
 
-/** The space around a box of the mark, in CSS pixels. */
+/** The least space around a box of the mark, in CSS pixels. See padBox in line-boxes.ts. */
 const BOX_PAD = 2;
 
 /** After the user scrolls the viewer, the view does not scroll by itself for this many milliseconds. */
@@ -25,7 +25,7 @@ const AUTO_SCROLL_MS = 1000;
 export interface Marks {
   width: number;
   height: number;
-  /** The boxes, with `pad` page pixels of padding. */
+  /** The boxes, with at least `pad` page pixels of padding. */
   boxes(pad: number): Box[];
 }
 

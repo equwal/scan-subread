@@ -44,21 +44,33 @@ function grow(box: Box, bbox: Box): void {
 }
 
 /**
+ * The share of the line height that pads the left and the right side of a
+ * box. Tesseract symbol boxes can end some pixels before the ink of a
+ * letter, more in a larger font. A quarter of the line height is about the
+ * width of a word space, so the box does not reach the next word.
+ */
+export const SIDE_PAD = 0.25;
+
+/**
+ * `box` with `pad` pixels on each side. The left and the right side get
+ * SIDE_PAD of the height of the box when that is more.
+ */
+export function padBox(box: Box, pad: number): Box {
+  const side = Math.max(pad, SIDE_PAD * (box.y1 - box.y0));
+  return { x0: box.x0 - side, y0: box.y0 - pad, x1: box.x1 + side, y1: box.y1 + pad };
+}
+
+/**
  * One box for each text line of `span` on `page`: the union of the boxes
- * of its tokens on that line, plus `pad` pixels on each side. Tokens on
- * other pages do not count. A span of an older alignment can go past the
- * end of `tokens`: those indices do not count either.
+ * of its tokens on that line. Tokens on other pages do not count. A span of
+ * an older alignment can go past the end of `tokens`: those indices do not
+ * count either.
  *
  * The alignment drops punctuation, and it can drop a noisy letter at the
  * edge of a cue. So the box of a line grows to the edges of its first and
  * its last word (see `joins`).
  */
-export function lineBoxes(
-  tokens: readonly OcrToken[],
-  span: TokenSpan,
-  page: number,
-  pad = 0,
-): Box[] {
+export function lineBoxes(tokens: readonly OcrToken[], span: TokenSpan, page: number): Box[] {
   /** For each line: its box, and the first and the last token of the span on it. */
   const lines = new Map<number, { box: Box; first: number; last: number }>();
   for (let t = span.start; t < span.end; t++) {
@@ -74,6 +86,6 @@ export function lineBoxes(
   return [...lines.values()].map(({ box, first, last }) => {
     for (let t = first - 1; joins(tokens[first]!, tokens[t], true); t--) grow(box, tokens[t]!.bbox);
     for (let t = last + 1; joins(tokens[last]!, tokens[t], false); t++) grow(box, tokens[t]!.bbox);
-    return { x0: box.x0 - pad, y0: box.y0 - pad, x1: box.x1 + pad, y1: box.y1 + pad };
+    return box;
   });
 }

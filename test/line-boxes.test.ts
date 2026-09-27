@@ -1,7 +1,7 @@
 import fc from 'fast-check';
 import { describe, expect, it } from 'vitest';
 import type { OcrToken, TokenSpan } from '../src/align';
-import { lineBoxes, type Box } from '../src/line-boxes';
+import { lineBoxes, padBox, SIDE_PAD, type Box } from '../src/line-boxes';
 
 function token(page: number, line: number, x0: number, y0: number): OcrToken {
   return { text: 'a', page, line, bbox: { x0, y0, x1: x0 + 10, y1: y0 + 20 } };
@@ -112,9 +112,19 @@ describe('lineBoxes', () => {
     expect(lineBoxes(line, spanOf(3, 7), 0)).toEqual([{ x0: 30, y0: 0, x1: 80, y1: 20 }]);
   });
 
-  it('pads each box on each side', () => {
-    const line = textTokens(['quiet hills,']);
-    expect(lineBoxes(line, spanOf(0, 9), 0, 3)).toEqual([{ x0: -3, y0: -3, x1: 123, y1: 23 }]);
+  it('pads the sides by a quarter of the line height when that is more than the padding', () => {
+    // The phone case: a page 1600 px wide on a phone of 360 CSS px. 2 CSS px
+    // are 9 page px, and the line box of a scan is 56 px high. Tesseract
+    // symbol boxes ended 10 to 18 px before the ink of the last letter.
+    const line: OcrToken[] = [...'hills,'].map((ch, i) => ({
+      text: ch,
+      page: 0,
+      line: 0,
+      word: 0,
+      bbox: { x0: 100 + 25 * i, y0: 300, x1: 125 + 25 * i, y1: 356 },
+    }));
+    const boxes = lineBoxes(line, spanOf(0, 6), 0).map((b) => padBox(b, 9));
+    expect(boxes).toEqual([{ x0: 86, y0: 291, x1: 264, y1: 365 }]);
   });
 
   it('gives the box of the whole words of the span on each line', () => {
@@ -132,11 +142,10 @@ describe('lineBoxes', () => {
         fc.constant(page),
         fc.nat({ max: page.length - 1 }),
         fc.nat({ max: page.length - 1 }),
-        fc.nat({ max: 5 }),
       );
     });
     fc.assert(
-      fc.property(input, ([page, a, b, pad]) => {
+      fc.property(input, ([page, a, b]) => {
         const span = spanOf(Math.min(a, b), Math.max(a, b) + 1);
         const inSpan = page.slice(span.start, span.end);
         const expected = new Map<number, Box>();
@@ -152,13 +161,41 @@ describe('lineBoxes', () => {
             box.y1 = Math.max(box.y1, t.bbox.y1);
           }
         }
-        const padded = [...expected.values()].map((b) => ({
-          x0: b.x0 - pad,
-          y0: b.y0 - pad,
-          x1: b.x1 + pad,
-          y1: b.y1 + pad,
-        }));
-        expect(lineBoxes(page, span, 0, pad)).toEqual(padded);
+        expect(lineBoxes(page, span, 0)).toEqual([...expected.values()]);
+      }),
+    );
+  });
+});
+
+describe('padBox', () => {
+  it('pads each side by the padding when the line is low', () => {
+    // A quarter of the 20 px line is 5 px, less than the padding.
+    expect(padBox({ x0: 0, y0: 0, x1: 120, y1: 20 }, 6)).toEqual({
+      x0: -6,
+      y0: -6,
+      x1: 126,
+      y1: 26,
+    });
+  });
+
+  it('holds the box, pads the top and the bottom by the padding, and each side by the larger rule', () => {
+    const box = fc
+      .tuple(
+        fc.integer({ min: -2000, max: 2000 }),
+        fc.integer({ min: -2000, max: 2000 }),
+        fc.nat({ max: 2000 }),
+        fc.nat({ max: 400 }),
+      )
+      .map(([x0, y0, w, h]) => ({ x0, y0, x1: x0 + w, y1: y0 + h }));
+    // Whole pixels, so the sums are exact.
+    fc.assert(
+      fc.property(box, fc.nat({ max: 50 }), (b, pad) => {
+        const out = padBox(b, pad);
+        const side = Math.max(pad, SIDE_PAD * (b.y1 - b.y0));
+        expect(out).toEqual({ x0: b.x0 - side, y0: b.y0 - pad, x1: b.x1 + side, y1: b.y1 + pad });
+        expect(b.x0 - out.x0).toBeGreaterThanOrEqual(pad);
+        expect(out.x1 - b.x1).toBeGreaterThanOrEqual(pad);
+        expect(out.x1 - b.x1).toBeGreaterThanOrEqual(SIDE_PAD * (b.y1 - b.y0));
       }),
     );
   });

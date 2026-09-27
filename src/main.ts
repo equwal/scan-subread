@@ -12,7 +12,7 @@ import { audioPage, cueParts, cueProgress, pageStartTime, type CueParts } from '
 import { setupDrawer } from './drawer';
 import { follow, type FollowEvent, type FollowMode } from './follower';
 import { lookupText, tapTolerance, tokenAt } from './hit-test';
-import { lineBoxes } from './line-boxes';
+import { lineBoxes, padBox } from './line-boxes';
 import {
   clockText,
   errorMessage,
@@ -619,7 +619,7 @@ function marks(index: number): Marks | null {
   return {
     width: entry.width,
     height: entry.height,
-    boxes: (pad) => lineBoxes(state.tokens, span, index, pad),
+    boxes: (pad) => lineBoxes(state.tokens, span, index).map((box) => padBox(box, pad)),
   };
 }
 
