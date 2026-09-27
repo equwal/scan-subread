@@ -44,6 +44,22 @@ export interface BookSubtitles {
   source: 'file' | 'subread';
 }
 
+/**
+ * A SubRead result that came while another book was open. It waits in the
+ * meta data of its book, and the reader offers it, with the confirm and the
+ * checks, when the book opens (see subreadConcerns).
+ */
+export interface KeptResult {
+  /** The text of the .srt. */
+  srt: string;
+  /** The number of cues, when SubRead told it. */
+  cues?: number;
+  /** 0 to 1: the share of the lines that SubRead found in the book, when it told it. */
+  matchRate?: number;
+  /** The language that SubRead found, when it told it. */
+  language?: string | null;
+}
+
 /** What the reader keeps for a book, other than its pages. */
 export interface BookMeta {
   /** The page that was open. 0 is the first page. */
@@ -51,6 +67,8 @@ export interface BookMeta {
   subtitles?: BookSubtitles;
   /** The "Force OCR" setting for the book. */
   forceOcr?: boolean;
+  /** A SubRead result that waits for the next open of the book. */
+  subread?: KeptResult;
 }
 
 /** The record of the last book. */
@@ -198,9 +216,21 @@ export function getLastBook(): Promise<File | undefined> {
   });
 }
 
-/** Removes the copy of the last book, for example when its data cannot be read. */
-export async function clearLastBook(): Promise<void> {
-  await tryDb((d) => d.delete('books', LAST));
+/**
+ * Removes the copy of the last book, for example when its data cannot be
+ * read, but only while the copy is of the book `key` (see bookKey). The copy
+ * of another book stays: the user can open a book while the restore of the
+ * last book runs, and the copy of that book replaces the last book.
+ */
+export async function clearLastBook(key: string): Promise<void> {
+  await tryDb((d) => {
+    // One transaction reads and deletes, so a new copy cannot come between.
+    const tx = d.transaction('books', 'readwrite');
+    const remove = async (): Promise<void> => {
+      if ((await tx.store.get(LAST))?.key === key) await tx.store.delete(LAST);
+    };
+    return Promise.all([remove(), tx.done]);
+  });
 }
 
 /**

@@ -5,6 +5,8 @@
   --highlight-solid: rgb(255, 200, 0);
   --highlight-weak: rgba(120, 160, 255, 0.35);
   --topbar: 3.25rem;
+  /* The height of the status strip. The panel of its full texts starts under it. */
+  --strip: 2rem;
   /* The size of a button of the top bar: 48 CSS px, the Android guideline for a touch target. */
   --target: 3rem;
   --panel-width: 22rem;
@@ -157,12 +159,14 @@ body {
  * One line of a fixed height, so the page under it never moves: a long
  * message wrapped and pushed the page down, and the page went up again
  * when the message faded. A long text ends with an ellipsis. Its title
- * attribute holds the full text (status.ts).
+ * attribute holds the full text, and a tap on the strip shows the full
+ * texts in #strip-full (status.ts).
  */
 #strip {
   flex: none;
   box-sizing: border-box;
-  height: 2rem;
+  height: var(--strip);
+  cursor: pointer;
   display: flex;
   flex-wrap: nowrap;
   align-items: stretch;
@@ -236,6 +240,46 @@ button.action {
 
 #status.faded {
   opacity: 0;
+}
+
+/*
+ * While an event shows, it takes the place of the player text: on a phone
+ * the parts do not fit in one line. The link or the button of the player
+ * stays.
+ */
+#strip.event #player-status .text,
+#strip.event #player-status:not(:has(a, button)) {
+  display: none;
+}
+
+/*
+ * The full texts of the strip, after a tap on it: a phone cannot hover to
+ * read the title attribute. The panel floats over the top of the page, so
+ * the page does not move. The next tap closes it.
+ */
+#strip-full {
+  position: fixed;
+  top: calc(var(--topbar) + var(--strip));
+  left: 0;
+  right: 0;
+  z-index: 6;
+  box-sizing: border-box;
+  max-height: 50vh;
+  overflow-y: auto;
+  padding: 0.5rem 0.75rem;
+  display: flex;
+  flex-direction: column;
+  gap: 0.4rem;
+  font-size: 0.85rem;
+  line-height: 1.35;
+  background: Canvas;
+  border-bottom: 1px solid #8884;
+  box-shadow: 0 4px 12px #0004;
+}
+
+#strip-full p {
+  margin: 0;
+  overflow-wrap: anywhere;
 }
 
 #panel {
@@ -523,6 +567,10 @@ body.zoomed #viewer {
     grid-column: 2;
     grid-row: 2;
     min-width: 0;
+  }
+
+  #strip-full {
+    left: var(--panel-width);
   }
 
   #panel {

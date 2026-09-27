@@ -128,6 +128,24 @@ describe('token cache', () => {
     expect(await cache.getMeta('inu.pdf|20')).toEqual({});
   });
 
+  it('keeps a SubRead result for a book apart from its subtitles', async () => {
+    // The finding: a SubRead result for a book that was not open went into
+    // its subtitles, without the confirm and the checks of the language and
+    // the match rate. It now waits as a result, and the subtitles stay.
+    const cache = await freshCache();
+    const subtitles: BookSubtitles = { name: 'neko.srt', text: srt, source: 'file' };
+    const result = { srt: '1\n00:00:00,000 --> 00:00:01,000\nx\n', cues: 23, language: 'km' };
+    await cache.putMeta('neko.pdf|10', { subtitles });
+    await cache.putMeta('neko.pdf|10', { subread: { ...result, matchRate: 1 } });
+    expect(await cache.getMeta('neko.pdf|10')).toEqual({
+      subtitles,
+      subread: { ...result, matchRate: 1 },
+    });
+    // The offer of the result removes it.
+    await cache.putMeta('neko.pdf|10', { subread: undefined });
+    expect(await cache.getMeta('neko.pdf|10')).toEqual({ subtitles });
+  });
+
   it('keeps the fields of two merges at the same time', async () => {
     const cache = await freshCache();
     await Promise.all([
@@ -143,12 +161,26 @@ describe('token cache', () => {
     await cache.putLastBook(neko);
     await cache.putMeta(cache.bookKey(neko), { page: 2 });
     await cache.putPage(cache.pageKey(neko, 0, 'jpn', 'ocr'), entry);
-    await cache.clearLastBook();
+    await cache.clearLastBook(cache.bookKey(neko));
     expect(await cache.getLastBook()).toBeUndefined();
     expect(await cache.getMeta(cache.bookKey(neko))).toEqual({ page: 2 });
     expect(await cache.getPage(cache.pageKey(neko, 0, 'jpn', 'ocr'))).toEqual(entry);
     // No last book: nothing to forget.
-    await expect(cache.clearLastBook()).resolves.toBeUndefined();
+    await expect(cache.clearLastBook(cache.bookKey(neko))).resolves.toBeUndefined();
+  });
+
+  it('forgets the last book only while the copy is of that book', async () => {
+    // The finding: the restore of the last book failed after the user had
+    // opened another book, and it deleted the copy of the user's book.
+    const cache = await freshCache();
+    const last = new File(['%PDF-1.7 猫'], 'neko.pdf', { type: 'application/pdf' });
+    const picked = new File(['%PDF-1.7 犬と猫'], 'inu.pdf', { type: 'application/pdf' });
+    await cache.putLastBook(last);
+    await cache.putLastBook(picked);
+    await cache.clearLastBook(cache.bookKey(last));
+    expect((await cache.getLastBook())?.name).toBe('inu.pdf');
+    await cache.clearLastBook(cache.bookKey(picked));
+    expect(await cache.getLastBook()).toBeUndefined();
   });
 
   it('tells when the database is open, after the upgrade', async () => {
@@ -229,7 +261,7 @@ describe('token cache', () => {
     await expect(cache.putMeta('b', { page: 1 })).resolves.toBeUndefined();
     await expect(cache.putLastBook(new File(['x'], 'b.pdf'))).resolves.toBe(false);
     await expect(cache.getLastBook()).resolves.toBeUndefined();
-    await expect(cache.clearLastBook()).resolves.toBeUndefined();
+    await expect(cache.clearLastBook('b.pdf|1')).resolves.toBeUndefined();
     await expect(cache.dbReady()).resolves.toBeUndefined();
     expect(warn).toHaveBeenCalledTimes(1);
   });

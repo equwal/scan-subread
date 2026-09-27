@@ -5,6 +5,7 @@ import {
   OcrStartError,
   OcrTimeoutError,
   pageTimeLimit,
+  START_LIMIT_MS,
   stopOcr,
   type OcrWorker,
 } from '../src/ocr-job';
@@ -166,6 +167,94 @@ describe('createOcrJob', () => {
     await expect(job.start()).rejects.toBe(error);
     await expect(job.recognize('page 1', 0, 1000)).rejects.toBe(error);
     expect(start).toHaveBeenCalledTimes(1);
+  });
+
+  /** A start that never ends, as a stalled download. It keeps the signal of each start. */
+  function stalledStart() {
+    const signals: AbortSignal[] = [];
+    const start = vi.fn((signal: AbortSignal) => {
+      signals.push(signal);
+      return new Promise<OcrWorker<string>>(() => undefined);
+    });
+    return { start, signals };
+  }
+
+  it('gives the start error when the start takes longer than its limit, and stops the start', async () => {
+    // The finding: a download of the language data that stalls (a captive
+    // portal) held the start, and so the reading, for ever, with no Retry.
+    const { start, signals } = stalledStart();
+    const job = createOcrJob(start, 1000);
+    let settled = false;
+    const started = job
+      .start()
+      .catch((e: unknown) => e)
+      .finally(() => {
+        settled = true;
+      });
+    await vi.advanceTimersByTimeAsync(999);
+    expect(settled).toBe(false);
+    await vi.advanceTimersByTimeAsync(1);
+    expect(settled).toBe(true);
+    const error = await started;
+    expect(error).toBeInstanceOf(OcrStartError);
+    expect((error as Error).message).toBe(
+      'OCR could not start: Error: The start took more than 1 s.',
+    );
+    // The start of the worker gets the stop, so that it can stop its worker.
+    expect(signals[0]?.aborted).toBe(true);
+    expect(signals[0]?.reason).toBe(error);
+    // Each page gets the same start error. No new start runs.
+    await expect(job.recognize('page 1', 0, 1000)).rejects.toBe(error);
+    expect(start).toHaveBeenCalledTimes(1);
+    expect(vi.getTimerCount()).toBe(0);
+  });
+
+  it('gives the start error also where abort() keeps no reason (WebView before 98)', async () => {
+    // abort(reason) and AbortSignal.reason came in Chrome 98. The SIMD core of
+    // the app runs from WebView 91.
+    const abort = AbortController.prototype.abort;
+    const noReason = vi.spyOn(AbortController.prototype, 'abort').mockImplementation(function (
+      this: AbortController,
+    ) {
+      abort.call(this);
+    });
+    try {
+      const { start } = stalledStart();
+      const job = createOcrJob(start, 1000);
+      const started = job.start().catch((e: unknown) => e);
+      await vi.advanceTimersByTimeAsync(1000);
+      expect(await started).toBeInstanceOf(OcrStartError);
+    } finally {
+      noReason.mockRestore();
+    }
+  });
+
+  it('stops a worker that starts after the start limit', async () => {
+    const worker = fakeWorker(readPage);
+    const start = vi.fn(
+      () => new Promise<OcrWorker<string>>((resolve) => setTimeout(() => resolve(worker), 2000)),
+    );
+    const job = createOcrJob(start, 1000);
+    const started = job.start().catch((e: unknown) => e);
+    await vi.advanceTimersByTimeAsync(1000);
+    expect(await started).toBeInstanceOf(OcrStartError);
+    expect(worker.terminate).not.toHaveBeenCalled();
+    await vi.advanceTimersByTimeAsync(1000);
+    expect(worker.terminate).toHaveBeenCalledTimes(1);
+  });
+
+  it('stops a start that runs when the job stops', async () => {
+    const { start, signals } = stalledStart();
+    const job = createOcrJob(start, 1000);
+    const started = job.start().catch((e: unknown) => e);
+    job.stop();
+    expect(signals[0]?.aborted).toBe(true);
+    expect(await started).toEqual(new Error('OCR stopped.'));
+    expect(vi.getTimerCount()).toBe(0);
+  });
+
+  it('gives the start the limit of a page by default', () => {
+    expect(START_LIMIT_MS).toBe(pageTimeLimit(0));
   });
 
   it('rejects the page that runs on stop, stops the worker once, and starts no new worker', async () => {

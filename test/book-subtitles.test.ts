@@ -1,6 +1,33 @@
 import fc from 'fast-check';
 import { describe, expect, it } from 'vitest';
-import { resultName, srtName, subreadConcerns, subtitlesOnOpen } from '../src/book-subtitles';
+import {
+  keepMakeStatus,
+  resultName,
+  srtName,
+  subreadConcerns,
+  subtitlesOnOpen,
+} from '../src/book-subtitles';
+
+describe('keepMakeStatus', () => {
+  it('removes the SubRead result of the book before', () => {
+    // The finding: "15 cues, language en, 97% ..." of book A stayed in the
+    // menu when book B opened.
+    expect(keepMakeStatus('B', null, null)).toBe(false);
+  });
+
+  it('removes the wait of the book before: its job does not start', () => {
+    expect(keepMakeStatus('B', null, 'A')).toBe(false);
+  });
+
+  it('keeps the status of the job that runs: it tells why the button is off', () => {
+    expect(keepMakeStatus('B', 'A', null)).toBe(true);
+    expect(keepMakeStatus('A', 'A', null)).toBe(true);
+  });
+
+  it('keeps the wait of the book that opens again', () => {
+    expect(keepMakeStatus('A', null, 'A')).toBe(true);
+  });
+});
 
 describe('srtName', () => {
   it('puts .srt in place of .pdf', () => {

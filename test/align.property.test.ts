@@ -5,6 +5,7 @@ import {
   createAligner,
   normalizeText,
   risingChain,
+  shiftSpans,
   type TokenSpan,
 } from '../src/align';
 import { books, char, grams, pagesOfCue, readPages, word, type Book, type Token } from './book';
@@ -244,6 +245,76 @@ describe('createAligner properties', () => {
       }),
       { numRuns: 30 },
     );
+  });
+});
+
+describe('shiftSpans', () => {
+  const unmatched: TokenSpan = { start: 0, end: 0, matched: false };
+
+  /** A span of `n` tokens: matched and inside [0, n], or unmatched. */
+  function span(n: number): fc.Arbitrary<TokenSpan> {
+    if (n === 0) return fc.constant(unmatched);
+    const matched = fc
+      .nat({ max: n - 1 })
+      .chain((start) =>
+        fc.integer({ min: start + 1, max: n }).map((end) => ({ start, end, matched: true })),
+      );
+    return fc.oneof(fc.constant(unmatched), matched);
+  }
+
+  it('keeps the first and the last token of each span when tokens go in', () => {
+    // The finding: page 19, read after page 20, put its tokens in front of
+    // the tokens of page 20, and the spans pointed at other tokens until
+    // the next alignment.
+    const input = fc
+      .nat({ max: 40 })
+      .chain((n) =>
+        fc.tuple(fc.constant(n), fc.array(span(n)), fc.nat({ max: n }), fc.nat({ max: 20 })),
+      );
+    fc.assert(
+      fc.property(input, ([n, spans, at, count]) => {
+        const before = Array.from({ length: n }, (_, i) => `old ${i}`);
+        const after = [...before];
+        after.splice(at, 0, ...Array.from({ length: count }, (_, i) => `new ${i}`));
+        const shifted = shiftSpans(spans, at, count);
+        expect(shifted).toHaveLength(spans.length);
+        spans.forEach((s, i) => {
+          const moved = shifted[i]!;
+          if (!s.matched) {
+            expect(moved).toEqual(unmatched);
+            return;
+          }
+          expect(moved.matched).toBe(true);
+          expect(after[moved.start]).toBe(before[s.start]);
+          expect(after[moved.end - 1]).toBe(before[s.end - 1]);
+        });
+      }),
+    );
+  });
+
+  it('moves the spans of page 20 behind the tokens of page 19', () => {
+    // Page 20 has 5 tokens and two cues. Page 19 puts 4 tokens in front.
+    const spans = [
+      { start: 0, end: 3, matched: true },
+      { start: 3, end: 5, matched: true },
+      unmatched,
+    ];
+    expect(shiftSpans(spans, 0, 4)).toEqual([
+      { start: 4, end: 7, matched: true },
+      { start: 7, end: 9, matched: true },
+      unmatched,
+    ]);
+  });
+
+  it('keeps a span before the new tokens, and stretches a span across them', () => {
+    const spans = [
+      { start: 0, end: 2, matched: true },
+      { start: 2, end: 6, matched: true },
+    ];
+    expect(shiftSpans(spans, 4, 3)).toEqual([
+      { start: 0, end: 2, matched: true },
+      { start: 2, end: 9, matched: true },
+    ]);
   });
 });
 

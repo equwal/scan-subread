@@ -6,10 +6,26 @@
 // (the strip) and view.ts (the page).
 
 import { App } from '@capacitor/app';
-import { createAligner, type Aligner, type OcrToken, type TokenSpan } from './align';
+import { createAligner, shiftSpans, type Aligner, type OcrToken, type TokenSpan } from './align';
 import { ankiCard, cardSource } from './anki-card';
 import { backStep, keepScreenOn } from './app-state';
-import { resultName, srtName, subreadConcerns, subtitlesOnOpen } from './book-subtitles';
+import {
+  beginOpen,
+  createOpens,
+  endOpen,
+  failureShows,
+  lateMeta,
+  subtitlesOwner,
+  userOpened,
+  type Changes,
+} from './book-open';
+import {
+  keepMakeStatus,
+  resultName,
+  srtName,
+  subreadConcerns,
+  subtitlesOnOpen,
+} from './book-subtitles';
 import { bookText } from './book-text';
 import { LocalAudioClock, OverlayClock, type ClockSource, type ClockState } from './clock-source';
 import { audioPage, cueParts, cueProgress, pageStartTime, type CueParts } from './cue-pages';
@@ -25,6 +41,7 @@ import {
   clockText,
   EMPTY_FILE_TEXT,
   errorMessage,
+  keptResultText,
   LAST_BOOK_GONE_TEXT,
   matchedText,
   noCuesText,
@@ -42,7 +59,7 @@ import {
   subreadQuestion,
   subreadResultText,
   UPDATING_CACHE_TEXT,
-  waitPagesText,
+  waitMessage,
   withForceOcr,
   type Message,
 } from './messages';
@@ -71,6 +88,7 @@ import {
   putPage,
   type BookMeta,
   type BookSubtitles,
+  type KeptResult,
   type PageEntry,
 } from './token-cache';
 import { createPageView, type Marks } from './view';
@@ -172,6 +190,8 @@ const state = {
   dbSlow: false,
   /** "Force OCR" of the open book: the reading skips the text layer. */
   forceOcr: false,
+  /** What changed after the open of the book. Its meta data does not undo it (lateMeta). */
+  changed: { page: false, forceOcr: false } as Changes,
   /** A SubRead job that waits until all pages of its book are read. */
   makeWait: null as { audio: { uri: string; name: string }; book: string } | null,
   /** The book of the SubRead job that runs, or null. */
@@ -269,6 +289,8 @@ ui.lang.addEventListener('change', () => {
 ui.forceOcr.addEventListener('change', () => {
   const book = state.book;
   if (book === null) return;
+  // Meta data of the book that comes later does not undo this (lateMeta).
+  state.changed.forceOcr = true;
   setForceOcr(ui.forceOcr.checked);
   void putMeta(book, { forceOcr: state.forceOcr });
   void readBook();
@@ -304,32 +326,43 @@ ui.pdfFile.addEventListener('change', () => {
   void openBook(file);
 });
 
-/** The count of attempts to open a book, and the attempt of the book that is open. */
-const opens = { tried: 0, shown: 0 };
+/** The attempts to open a book, and the attempt of the book that is open. */
+const opens = createOpens();
+
+/** The restore of the last book: its meta data, and opens.byUser when the restore started. */
+interface Restore {
+  meta: BookMeta;
+  since: number;
+}
 
 /**
  * Opens `file` as the book. The book that is open stays until the new
  * file loads: a file that is not a PDF, or is damaged, changes nothing.
  *
- * `meta` is what the reader keeps for the book, when the caller has it:
- * the book opens at its page. Else the meta data comes from IndexedDB
- * after the open. The page shows and the reading starts at once, and the
- * meta data applies when it comes: an upgrade of the database can hold
- * IndexedDB for many seconds. Gives true when the new book is open.
+ * `restore` comes from the restore of the last book: the book opens at the
+ * page of its meta data. An open without it is a file that the user
+ * picked, and its meta data comes from IndexedDB after the open. The page
+ * shows and the reading starts at once, and the meta data applies when it
+ * comes: an upgrade of the database can hold IndexedDB for many seconds.
+ * Gives true when the new book is open.
  */
-async function openBook(file: File, meta?: BookMeta): Promise<boolean> {
-  if (file.size === 0) {
-    say(EMPTY_FILE_TEXT);
+async function openBook(file: File, restore?: Restore): Promise<boolean> {
+  const meta = restore?.meta;
+  const attempt = beginOpen(opens, restore === undefined);
+  /** Ends the attempt that failed. The strip shows `text` only when failureShows allows it. */
+  const fail = (text: string): false => {
+    endOpen(opens, attempt, false);
+    claimSubtitles();
+    if (failureShows(opens, attempt, restore?.since)) say(text);
     return false;
-  }
-  const attempt = ++opens.tried;
+  };
+  if (file.size === 0) return fail(EMPTY_FILE_TEXT);
   let bytes: ArrayBuffer;
   try {
     bytes = await file.arrayBuffer();
   } catch (err) {
     // The copy of the last book is gone, for example after the storage was cleared.
-    say(meta ? LAST_BOOK_GONE_TEXT : `Cannot read ${file.name}: ${String(err)}`);
-    return false;
+    return fail(restore ? LAST_BOOK_GONE_TEXT : `Cannot read ${file.name}: ${String(err)}`);
   }
   let pdf: PdfDoc;
   try {
@@ -337,15 +370,14 @@ async function openBook(file: File, meta?: BookMeta): Promise<boolean> {
     const { loadPdf } = await import('./pdf');
     pdf = await loadPdf(bytes);
   } catch (err) {
-    say(pdfOpenText(err));
-    return false;
+    return fail(pdfOpenText(err));
   }
   // A file that the user picked later is open already.
-  if (attempt < opens.shown) {
+  if (!endOpen(opens, attempt, true)) {
     void pdf.destroy();
+    claimSubtitles();
     return false;
   }
-  opens.shown = attempt;
   const key = bookKey(file);
   // The page of the book before goes to its meta data now.
   flushPageSave();
@@ -360,17 +392,20 @@ async function openBook(file: File, meta?: BookMeta): Promise<boolean> {
   state.activeCue = -1;
   state.markedCue = -1;
   state.held = false;
-  // The subtitles of another book go at once. Subtitles that were loaded
-  // while no book was open wait for the meta data of this book.
+  state.changed = { page: false, forceOcr: false };
+  // The subtitles of another book go at once. Subtitles of no book, loaded
+  // while no book was open or while this book loaded, are for this book.
   if (state.subtitles && state.subtitlesBook !== null && state.subtitlesBook !== key) {
     clearSubtitles();
   }
+  claimSubtitles();
   const subtitlesSeq = state.subtitlesSeq;
-  // A SubRead job that waits for the pages of another book does not start.
-  if (state.makeWait && state.makeWait.book !== key) {
-    state.makeWait = null;
+  // The SubRead status of the book before goes, unless a job runs.
+  if (!keepMakeStatus(key, state.making, state.makeWait?.book ?? null)) {
     ui.makeStatus.textContent = '';
   }
+  // A SubRead job that waits for the pages of another book does not start.
+  if (state.makeWait && state.makeWait.book !== key) state.makeWait = null;
   setForceOcr(meta?.forceOcr ?? false);
   ui.forceOcr.disabled = false;
   ui.clearBook.disabled = false;
@@ -381,7 +416,9 @@ async function openBook(file: File, meta?: BookMeta): Promise<boolean> {
   if (state.clock) showPlayerStatus(state.clock);
   say(pdfLoadedText(pdf.numPages));
   // showPage sets the current page at once, so the reading starts there.
-  void showPage(validPage(meta?.page, pdf.numPages) ?? 0);
+  // This page is the saved page, or page 1 until the meta data comes: no
+  // save, so page 1 does not go over the saved page of the book.
+  void showPage(validPage(meta?.page, pdf.numPages) ?? 0, false);
   // readBook stops the reading of the old book before its document closes.
   void readBook();
   void old?.destroy();
@@ -405,41 +442,43 @@ function validPage(page: number | undefined, pages: number): number | undefined 
 /**
  * Applies the meta data of the book that open attempt `attempt` opened.
  * `subtitlesSeq` is the count of subtitle loads at the open: subtitles
- * that the user loaded after the open stay. The page applies only while
- * the first page shows, so a page turn after the open stays.
+ * that the user loaded after the open stay. A page turn and a change of
+ * "Force OCR" after the open stay too (lateMeta).
  */
 function applyMeta(meta: BookMeta, attempt: number, subtitlesSeq: number): void {
   const key = state.book;
   const pdf = state.pdf;
   if (attempt !== opens.shown || key === null || !pdf) return;
-  const page = validPage(meta.page, pdf.numPages);
-  if (page !== undefined && page !== state.currentPage && state.currentPage === 0) {
-    void showPage(page);
-  }
-  const forceOcr = meta.forceOcr ?? false;
-  if (forceOcr !== state.forceOcr) {
-    setForceOcr(forceOcr);
+  const late = lateMeta(meta, state.changed);
+  const page = validPage(late.page, pdf.numPages);
+  // The saved page needs no new save.
+  if (page !== undefined && page !== state.currentPage) void showPage(page, false);
+  if (late.forceOcr !== undefined && late.forceOcr !== state.forceOcr) {
+    setForceOcr(late.forceOcr);
     void readBook();
   }
   if (state.subtitlesSeq === subtitlesSeq) {
     const loaded = state.subtitles ? state.subtitlesBook : undefined;
     switch (subtitlesOnOpen(loaded, key, meta.subtitles !== undefined)) {
       case 'keep':
-        if (state.subtitles) {
-          state.subtitlesBook = key;
-          void putMeta(key, { subtitles: state.subtitles });
-        }
+        claimSubtitles();
         break;
       case 'load':
-        if (meta.subtitles) loadSubtitles(meta.subtitles, { save: false });
+        if (meta.subtitles) loadSubtitles(meta.subtitles, { book: key, save: false });
         break;
       case 'clear':
         clearSubtitles();
         break;
     }
   }
-  // After the saved subtitles: a SubRead result for a book with a file of
-  // the user asks first.
+  // After the saved subtitles, so that a SubRead result asks first when it
+  // replaces a file of the user. A result that came while another book was
+  // open gets the same offer as the result for the open book.
+  const kept = meta.subread;
+  if (kept) {
+    void putMeta(key, { subread: undefined });
+    if (offerSubreadSubtitles(kept.srt, kept)) ui.makeStatus.textContent = subreadResultText(kept);
+  }
   void checkPendingSubtitles();
 }
 
@@ -482,20 +521,26 @@ function showStart(): void {
  * Opens the last book at its page, with its subtitles. Android stops the
  * reader while the user is in the dictionary or in the player app, and a
  * reload forgets the file that the user opened.
+ *
+ * A book that the user opens while the restore waits for the database
+ * wins, also while it still loads (userOpened).
  */
 async function restoreLastBook(): Promise<void> {
+  const since = opens.byUser;
   const file = await getLastBook();
-  // The user opened a book while the database was busy.
-  if (state.pdf) return;
-  if (!file) {
+  if (!file || userOpened(opens, since)) {
     showStart();
     return;
   }
   const meta = await getMeta(bookKey(file));
-  if (state.pdf) return;
-  if (await openBook(file, meta)) return;
-  // The copy cannot be read, or it is no PDF now: forget it.
-  await clearLastBook();
+  if (userOpened(opens, since)) {
+    showStart();
+    return;
+  }
+  if (await openBook(file, { meta, since })) return;
+  // The copy cannot be read, or it is no PDF now: forget it. After an open
+  // by the user, the copy can be of the user's book, so it stays.
+  if (!userOpened(opens, since)) await clearLastBook(bookKey(file));
   showStart();
 }
 
@@ -524,8 +569,8 @@ function watchDb(): void {
 /**
  * The tokens of one page: from the cache, else the text layer, else OCR.
  * `force` skips the text layer. Rejects with OcrStartError when the page
- * needs OCR and OCR cannot start, and with OcrTimeoutError when the OCR of
- * the page takes too long.
+ * needs OCR and OCR cannot start or its start takes too long, and with
+ * OcrTimeoutError when the OCR of the page takes too long.
  */
 async function readPage(
   pdf: PdfDoc,
@@ -561,6 +606,9 @@ async function readPage(
 /** The OCR of the reading that runs now. */
 let readingOcr: OcrJob<HTMLCanvasElement> | undefined;
 
+/** True while readBook reads the pages. */
+let readingRuns = false;
+
 /**
  * Reads every page of the book: the current page first, then the pages
  * after it, then the pages before it. The cues are aligned again as pages
@@ -574,6 +622,7 @@ async function readBook(retry = false): Promise<void> {
   const { pdf, file } = state;
   if (!pdf || !file) return;
   const seq = ++state.readSeq;
+  readingRuns = true;
   // The OCR of the reading before stops at once. It does not finish its
   // page: two quick changes of a setting ran two OCR jobs at the same time.
   readingOcr?.stop();
@@ -585,6 +634,8 @@ async function readBook(retry = false): Promise<void> {
     state.cueParts = [];
     state.markedCue = -1;
   }
+  // A SubRead job that waits shows the reading again, for example after Retry.
+  startMakeWhenRead();
   const total = pdf.numPages;
   const pending = new Set(
     Array.from({ length: total }, (_, i) => i).filter((i) => !state.pages[i]),
@@ -605,10 +656,11 @@ async function readBook(retry = false): Promise<void> {
   };
   // The OCR worker, and tesseract.js itself, load on the first page that
   // needs them. After a page that fails or takes too long, the job stops
-  // the worker, and the next page starts a new one.
-  const ocr = createOcrJob<HTMLCanvasElement>(() =>
+  // the worker, and the next page starts a new one. A start that takes too
+  // long gives each page the start error, and the strip shows Retry.
+  const ocr = createOcrJob<HTMLCanvasElement>((signal) =>
     import('./ocr').then(
-      ({ createOcr }) => createOcr(lang, onOcrProgress),
+      ({ createOcr }) => createOcr(lang, onOcrProgress, signal),
       (err: unknown) => {
         throw new OcrStartError(err);
       },
@@ -638,9 +690,12 @@ async function readBook(retry = false): Promise<void> {
       if (seq !== state.readSeq) return; // Another book or another setting took over.
       counts[entry.source]++;
       state.pages[page] = entry;
-      // Put the tokens of the page at their place in page order.
+      // Put the tokens of the page at their place in page order. The spans
+      // keep their tokens until the next alignment: the mark and the Anki
+      // card use them.
       const at = state.pages.slice(0, page).reduce((n, p) => n + (p?.tokens.length ?? 0), 0);
       state.tokens.splice(at, 0, ...entry.tokens);
+      state.spans = shiftSpans(state.spans, at, entry.tokens.length);
       const how = entry.source === 'text' ? 'text layer' : 'OCR';
       setReading(readingText(read(), total, `page ${page + 1}: ${how}`));
       if (page === state.currentPage) view.mark();
@@ -656,7 +711,12 @@ async function readBook(retry = false): Promise<void> {
     if (seq === state.readSeq) say(`Cannot read the pages: ${String(err)}`);
   } finally {
     ocr.stop();
-    if (seq === state.readSeq) setReading(readingEndMessage(failed, startFailed));
+    if (seq === state.readSeq) {
+      readingRuns = false;
+      setReading(readingEndMessage(failed, startFailed));
+      // A SubRead job that waits now waits for pages that could not be read.
+      startMakeWhenRead();
+    }
   }
 }
 
@@ -702,24 +762,26 @@ ui.clearAll.addEventListener('click', async () => {
 
 /**
  * Loads subtitles from a file, from SubRead or from the meta data of the
- * book. They belong to the open book, or to the book that opens next.
+ * book.
  *
+ * - `book` is the book that they belong to. Null: no book yet, and the
+ *   book that shows when no open loads gets them (claimSubtitles).
  * - `from` names where they came from in the message.
  * - `cues` are the cues of the text, when the caller parsed them already.
- * - `save` keeps them in the meta data of the open book. The default is
- *   true: each file and each SubRead result is kept.
+ * - `save` keeps them in the meta data of `book`. The default is true:
+ *   each file and each SubRead result is kept.
  */
 function loadSubtitles(
   subtitles: BookSubtitles,
-  opts: { from?: string; cues?: Cue[]; save?: boolean } = {},
+  opts: { book: string | null; from?: string; cues?: Cue[]; save?: boolean },
 ): void {
   const cues = opts.cues ?? parseSubtitles(subtitles.text);
   state.cues = cues;
   state.aligner = createAligner(cues.map((c) => c.text));
   state.subtitles = subtitles;
-  state.subtitlesBook = state.book;
+  state.subtitlesBook = opts.book;
   state.subtitlesSeq++;
-  if (opts.save !== false && state.book !== null) void putMeta(state.book, { subtitles });
+  if (opts.save !== false && opts.book !== null) void putMeta(opts.book, { subtitles });
   state.spans = [];
   state.cueParts = [];
   state.activeCue = -1;
@@ -732,6 +794,19 @@ function loadSubtitles(
       (matched === null ? '' : ` ${matchedText(matched, cues.length, allPagesRead())}`),
   );
   showSrtRow();
+}
+
+/**
+ * Gives subtitles of no book to the book that shows, and keeps them in its
+ * meta data. While an open loads that can replace that book, the subtitles
+ * wait (subtitlesOwner). Each end of an open, and the meta data of the new
+ * book, call this again.
+ */
+function claimSubtitles(): void {
+  const book = subtitlesOwner(opens, state.book);
+  if (!state.subtitles || state.subtitlesBook !== null || book === null) return;
+  state.subtitlesBook = book;
+  void putMeta(book, { subtitles: state.subtitles });
 }
 
 /** Removes the subtitles: the cues, the cue list, the mark, the .srt row. */
@@ -778,7 +853,9 @@ ui.subFile.addEventListener('change', async () => {
     say(noCuesText(file.name));
     return;
   }
-  loadSubtitles({ name: file.name, text, source: 'file' }, { cues });
+  // During the open of another book, the file is for the book that shows next.
+  const book = subtitlesOwner(opens, state.book);
+  loadSubtitles({ name: file.name, text, source: 'file' }, { book, cues });
 });
 
 /**
@@ -822,14 +899,17 @@ ui.makeSubs.addEventListener('click', async () => {
 
 /**
  * Starts the SubRead job that waits, when all pages of its book are read.
- * Else tells how far the reading is. readBook calls this after each page.
+ * Else tells how far the reading is, or after the reading, how many pages
+ * could not be read, with Retry (waitMessage). readBook calls this after
+ * each page and at its end, so a Retry that reads those pages starts the job.
  */
 function startMakeWhenRead(): void {
   const wait = state.makeWait;
   const pdf = state.pdf;
   if (!wait || !pdf || wait.book !== state.book) return;
   if (!allPagesRead()) {
-    ui.makeStatus.textContent = waitPagesText(state.pages.filter((p) => p).length, pdf.numPages);
+    const read = state.pages.filter((p) => p).length;
+    fill(ui.makeStatus, waitMessage(read, pdf.numPages, readingRuns));
     return;
   }
   state.makeWait = null;
@@ -856,11 +936,6 @@ async function makeSubtitles(audio: { uri: string; name: string }, book: string)
     state.making = null;
     ui.makeSubs.disabled = state.book === null;
   }
-  // The result file waits for its book: pendingSubtitles loads it when the book opens.
-  if (state.book !== book) {
-    ui.makeStatus.textContent = 'SubRead finished, but another book is open now.';
-    return;
-  }
   if (result.error === 'not_installed') {
     fill(ui.makeStatus, SUBREAD_NOT_INSTALLED);
     return;
@@ -873,12 +948,25 @@ async function makeSubtitles(audio: { uri: string; name: string }, book: string)
     ui.makeStatus.textContent = subreadErrorText(result.error ?? 'no file');
     return;
   }
+  // Another book opened during the job: the result waits for its book,
+  // with what SubRead told about it, for the checks of the offer.
   if (state.book !== book) {
-    void putMeta(book, { subtitles: subreadSubtitles(book, srt) });
+    const { cues, matchRate, language } = result;
+    keepResult(book, { srt, cues, matchRate, language });
     return;
   }
   ui.makeStatus.textContent = subreadResultText(result);
   offerSubreadSubtitles(srt, result);
+}
+
+/**
+ * Keeps a SubRead result for the book `book`, which is not open, in its
+ * meta data. It is not saved as the subtitles of the book: applyMeta
+ * offers it when the book opens, with the confirm and the checks.
+ */
+function keepResult(book: string, kept: KeptResult): void {
+  void putMeta(book, { subread: kept });
+  ui.makeStatus.textContent = keptResultText(bookName(book));
 }
 
 type PendingSrt = { srt?: string };
@@ -910,7 +998,7 @@ function offerSubreadSubtitles(
     say('The subtitles of SubRead are not loaded.');
     return false;
   }
-  loadSubtitles(subreadSubtitles(book, srt), { from: 'SubRead' });
+  loadSubtitles(subreadSubtitles(book, srt), { book, from: 'SubRead' });
   return true;
 }
 
@@ -932,9 +1020,9 @@ async function checkPendingSubtitles(): Promise<void> {
   }
   const srt = pending.srt;
   if (srt === undefined) return;
-  // The call removed the file, so the .srt goes to the meta data of its book.
+  // The call removed the file, so the .srt waits in the meta data of its book.
   if (state.book !== book) {
-    void putMeta(book, { subtitles: subreadSubtitles(book, srt) });
+    keepResult(book, { srt });
     return;
   }
   if (offerSubreadSubtitles(srt, {})) {
@@ -1237,12 +1325,21 @@ function marks(index: number): Marks | null {
   };
 }
 
-async function showPage(index: number): Promise<void> {
+/**
+ * Shows page `index`. `save` is true for a page turn by the user or by the
+ * follow: the page goes to the meta data of the book soon, and the meta
+ * data that comes later does not turn the page back (lateMeta). The page
+ * of the open and the saved page need no save.
+ */
+async function showPage(index: number, save = true): Promise<void> {
   const pdf = state.pdf;
   if (!pdf || index < 0 || index >= pdf.numPages) return;
   state.currentPage = index;
   nav.update();
-  savePageSoon();
+  if (save) {
+    state.changed.page = true;
+    savePageSoon();
+  }
   try {
     await view.show(pdf, index);
   } catch (err) {

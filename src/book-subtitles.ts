@@ -100,3 +100,21 @@ export function subreadConcerns(c: SubreadCheck): string[] {
   }
   return out;
 }
+
+/**
+ * True when the make status, the SubRead part of the menu, stays when the
+ * book `book` opens. `making` is the book of the SubRead job that runs, and
+ * `waitBook` the book of the job that waits for its pages, before the open.
+ *
+ * The status of a job that runs stays: one job runs at a time, so it tells
+ * why the button is off. The status of a wait for this book stays. Else the
+ * status of the book before goes: the SubRead result of book A stayed in
+ * the menu of book B.
+ */
+export function keepMakeStatus(
+  book: string,
+  making: string | null,
+  waitBook: string | null,
+): boolean {
+  return making !== null || waitBook === book;
+}

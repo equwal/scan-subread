@@ -22,13 +22,64 @@ import {
   playerProblem,
   readingEndMessage,
   readingText,
+  keptResultText,
   shownInPlayerPart,
+  stripTexts,
   subreadErrorText,
   subreadQuestion,
   subreadResultText,
+  waitMessage,
   waitPagesText,
   withForceOcr,
 } from '../src/messages';
+
+describe('stripTexts', () => {
+  it('gives the full text of each part that shows, for the panel of the strip', () => {
+    // The phone finding: the strip showed "No subtitle li..." next to
+    // "Allow notification acces..." and the "Open SubRead Overlay" button.
+    const player = 'Allow notification access in SubRead Overlay.';
+    const event = 'No subtitle lines in book.srt.pdf. Choose an .srt or .vtt file.';
+    expect(
+      stripTexts([
+        { shown: true, title: player, text: `${player} Open SubRead Overlay` },
+        { shown: false, title: '', text: 'Follow paused' },
+        { shown: false, title: '', text: '' },
+        { shown: true, title: event, text: event },
+      ]),
+    ).toEqual([player, event]);
+  });
+
+  it('takes the text of a part without a title, and skips a part without text', () => {
+    expect(
+      stripTexts([
+        { shown: true, title: '', text: 'Follow paused' },
+        { shown: true, title: '', text: ' ' },
+      ]),
+    ).toEqual(['Follow paused']);
+  });
+});
+
+describe('waitMessage', () => {
+  const retry = { id: 'retry-reading', text: 'Retry' };
+
+  it('tells how far the reading is while it runs', () => {
+    expect(waitMessage(3, 40, true)).toEqual({ text: 'Reading pages 3/40 first...' });
+  });
+
+  it('tells after the reading that SubRead waits for the pages that could not be read', () => {
+    // The finding: after "2 pages could not be read." the menu still said
+    // "Reading pages 38/40 first...", and SubRead never started.
+    expect(waitMessage(38, 40, false)).toEqual({
+      text: 'SubRead waits for 2 pages that could not be read.',
+      action: retry,
+    });
+    // OCR could not start: no page of the scan is read.
+    expect(waitMessage(0, 1, false)).toEqual({
+      text: 'SubRead waits for 1 page that could not be read.',
+      action: retry,
+    });
+  });
+});
 
 function state(over: Partial<ClockState>): ClockState {
   return { positionMs: 0, playing: false, seeked: false, error: null, ...over };
@@ -263,6 +314,12 @@ describe('SubRead texts', () => {
     expect(subreadResultText({})).toBe('? cues, language ?.');
     expect(subreadResultText({ cues: -1, language: null, matchRate: -1 })).toBe(
       '? cues, language ?.',
+    );
+  });
+
+  it('tells that the result for a book that is not open waits for that book', () => {
+    expect(keptResultText('neko.pdf')).toBe(
+      'SubRead made the subtitles of neko.pdf. The reader offers them when you open that book.',
     );
   });
 

@@ -357,6 +357,26 @@ export function risingChain(values: ArrayLike<number>): number[] {
 }
 
 /**
+ * The spans after `count` tokens go into the tokens at index `at`: each
+ * matched span keeps its first and its last token. The reader reads the
+ * pages after the current page first. A page before it then puts its tokens
+ * in front of the tokens that the spans index, and without this shift the
+ * spans point at other tokens until the next alignment. A span across `at`
+ * also holds the new tokens. An unmatched span stays as it is.
+ */
+export function shiftSpans(spans: readonly TokenSpan[], at: number, count: number): TokenSpan[] {
+  return spans.map((span) =>
+    span.matched
+      ? {
+          start: span.start < at ? span.start : span.start + count,
+          end: span.end <= at ? span.end : span.end + count,
+          matched: true,
+        }
+      : span,
+  );
+}
+
+/**
  * Align cues to tokens in one call. The tokens must be in page order, the
  * order that the reader keeps them in. The spans index `tokens`.
  */

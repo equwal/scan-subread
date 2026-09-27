@@ -50,8 +50,10 @@ In a browser, build and serve the web app (see "Run").
 2. In the menu, load the subtitles, or on Android press "Make subtitles
    with SubRead": pick the audiobook. SubRead starts when all pages are
    read ("Reading pages N/M first..."), and makes the `.srt` from the
-   audio and the text of the book. The result loads at once, is kept for
-   this PDF, and can be shared as a file.
+   audio and the text of the book. When pages could not be read, the
+   menu says "SubRead waits for 2 pages that could not be read." with
+   Retry, and SubRead starts when Retry reads them. The result loads at
+   once, is kept for this PDF, and can be shared as a file.
 3. Start the player. The status strip shows its position. The page
    follows.
 
@@ -74,16 +76,23 @@ its page, with its subtitles, without a picker. Android stops the
 reader while you are in the dictionary or in the player app, and the
 reader comes back where you were. When the copy cannot be read, for
 example after the app storage was cleared, the app forgets it and shows
-the start card.
+the start card. A book that you open while the last book loads, or while
+the start waits for the database, wins: the app does not open the last
+book over it, and it keeps the copy of your book.
 
 Subtitles belong to a book. Another book opens with its own subtitles,
 or with none. Subtitles that you load while no book is open are for the
-book that you open next. The page goes to the meta data of the book one
+book that you open next. Subtitles that you load while a new book loads
+are for that book. When the new book does not open, they are for the
+book that stays open. The page goes to the meta data of the book one
 second after it changes.
 
 The first start after an upgrade from a build with the old dictionary
 can take long: the upgrade deletes about 86 MB of dictionary data. The
 strip then says "Updating the page cache...", and the start card shows.
+A book that you open in that time shows at once, and its meta data
+applies when it comes. A page turn or a change of "Force OCR" that you
+make before then stays.
 
 ### Android: Back, the screen and the suite
 
@@ -104,6 +113,9 @@ strip then says "Updating the page cache...", and the start card shows.
 - Before the subtitles of SubRead load, the app asks when they replace
   a file that you loaded, when SubRead found another language than the
   one of the book, and when it found less than 80% of the lines.
+- A SubRead result for a book that is not open waits in the meta data of
+  that book. When you open the book, the app offers it with the same
+  questions.
 
 ### The status strip
 
@@ -118,10 +130,19 @@ The strip under the top bar shows three things:
   It goes away when all pages are read. A page that cannot be read does
   not stop the others: at the end the strip says "2 pages could not be
   read." with Retry, which reads only those pages. When OCR cannot
-  start, for example with no network on the first run, the strip says
-  so, with Retry. "Force OCR is on" shows while it is on for the book.
+  start, for example with no network on the first run, or its start
+  takes more than 2 minutes, the strip says so, with Retry. "Force OCR
+  is on" shows while it is on for the book.
 - The last event, for example a lookup or an error. It fades after 6
-  seconds. Screen readers read this part.
+  seconds. While it shows, it takes the place of the player text, but
+  the button or the link of the player stays. Screen readers read this
+  part.
+
+The strip is one line, so the page under it does not move, and a long
+text ends with "…". Tap the strip to read the full texts: they show in a
+panel over the top of the page. The next tap closes the panel, and else
+it closes after 6 seconds. A tap on a button of the strip, for example
+Retry, only does what the button does.
 
 ### The three follow modes
 
@@ -193,6 +214,14 @@ The OCR of a page can take 2 minutes, and more for a page of more than 4
 million pixels. When it takes longer, or when the OCR worker fails, the
 app stops the worker and counts the page as not read. The next page
 starts a new worker, so one bad page does not stop the reading.
+
+When the OCR worker cannot start, for example because the language data
+does not load, the app stops that worker too. tesseract.js does not stop
+it, so without this each Retry left one more worker in memory. The start
+also has a time limit of 2 minutes: a download of the language data that
+stalls, for example behind the login page of a public Wi-Fi, does not
+end by itself. After the limit the strip says that OCR could not start,
+with Retry.
 
 Both give the same tokens: one box per character with a line id and a
 word id. The alignment, the mark, the page turn and the lookup work the
@@ -492,9 +521,14 @@ in a browser bundle.
 - `src/messages.ts`: pure texts of the status strip.
 - `src/read-order.ts`: pure order in which the pages are read.
 - `src/book-text.ts`: pure tokens to the book text for SubRead.
+- `src/book-open.ts`: pure rules for the open of a book: the open
+  attempts, the book of subtitles that load during an open, the restore
+  of the last book, the error of an open that failed, and the meta data
+  that comes after the open.
 - `src/book-subtitles.ts`: pure rules for the subtitles of a book: the
-  subtitles when a book opens, the result file name for SubRead, and the
-  checks before a SubRead result loads.
+  subtitles when a book opens, the result file name for SubRead, the
+  checks before a SubRead result loads, and the SubRead status of the
+  menu when a book opens.
 - `src/sentence.ts`: pure sentence around a token.
 - `src/anki-card.ts`: pure fields of an Anki card for a long press.
 - `src/suite.ts`: pure checklist of the SubRead suite.
@@ -503,8 +537,9 @@ in a browser bundle.
 - `src/token-cache.ts`: IndexedDB store for the page tokens, the copy of
   the last book and the meta data of each book (thin).
 - `src/ocr.ts`, `src/pdf.ts`: thin browser wrappers around the libraries.
-  `src/ocr-job.ts`: the start error, the time limit of a page, the new
-  worker after a failed page and the stop of OCR, without tesseract.js.
+  `src/ocr-job.ts`: the start error, the time limits of the start and of
+  a page, the new worker after a failed page and the stop of OCR, without
+  tesseract.js.
 - `src/view.ts`: the page view: render to fit the width, draw the mark,
   scroll to it, render again on a resize.
 - `src/nav.ts`: page turns by the user: the arrows, the keys, the swipe

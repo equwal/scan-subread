@@ -12,6 +12,29 @@ export interface Message {
   action?: { id: ActionId; text: string };
 }
 
+/** A part of the status strip, for the panel of its full texts. */
+export interface StripPart {
+  /** False while the part is hidden. */
+  shown: boolean;
+  /** The full text of its message: its title attribute, or '' when it has none. */
+  title: string;
+  /** Its text as it shows, with the text of its link or its button. */
+  text: string;
+}
+
+/**
+ * The full texts of the parts of the strip that show, for the panel that a
+ * tap on the strip opens: the title of each part, else its text. A part
+ * with no text gives nothing. On the phone the one-line strip cut a long
+ * message, and a phone cannot hover to read the title.
+ */
+export function stripTexts(parts: readonly StripPart[]): string[] {
+  return parts
+    .filter((part) => part.shown)
+    .map((part) => part.title || part.text.trim())
+    .filter((text) => text !== '');
+}
+
 export const OVERLAY_RELEASES = 'https://github.com/equwal/subread-overlay/releases/latest';
 export const SUBREAD_RELEASES = 'https://github.com/equwal/subread-android/releases/latest';
 export const DICTIONARY_RELEASES = 'https://github.com/equwal/subread-dictionary/releases/latest';
@@ -184,6 +207,21 @@ export function waitPagesText(read: number, total: number): string {
   return `Reading pages ${read}/${total} first...`;
 }
 
+/**
+ * The make status while a SubRead job waits for the pages of its book.
+ * `reading` is true while the reading of the pages runs. After the reading,
+ * the pages that are not read could not be read: the job waits until Retry
+ * reads them. Before, the status kept "Reading pages 38/40 first...", and
+ * SubRead never started.
+ */
+export function waitMessage(read: number, total: number, reading: boolean): Message {
+  if (reading) return { text: waitPagesText(read, total) };
+  return {
+    text: `SubRead waits for ${count(total - read, 'page')} that could not be read.`,
+    action: RETRY,
+  };
+}
+
 /** What SubRead made: the cues, the language and the share of the lines found in the book. */
 export function subreadResultText(r: {
   cues?: number;
@@ -199,6 +237,11 @@ export function subreadResultText(r: {
       ? ' Under 80% usually means another edition or the wrong language.'
       : '')
   );
+}
+
+/** SubRead made the subtitles of the book `name`, which is not open. They wait for that book. */
+export function keptResultText(name: string): string {
+  return `SubRead made the subtitles of ${name}. The reader offers them when you open that book.`;
 }
 
 /** Why SubRead made no subtitles. `cannot_start` means that the read grant of the audio is gone. */
