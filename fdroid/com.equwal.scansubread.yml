@@ -13,7 +13,7 @@ AutoName: Scan SubRead
 
 RepoType: git
 Repo: https://github.com/equwal/scan-subread.git
-Binaries:
+Binaries: 
   https://github.com/equwal/scan-subread/releases/download/v%v/Scan-SubRead-%v.apk
 
 Builds:
@@ -23,7 +23,7 @@ Builds:
     subdir: android/app
     sudo:
       - curl -Lo node.tar.xz https://nodejs.org/dist/v22.23.3/node-v22.23.3-linux-x64.tar.xz
-      - echo "df450af89261115ef9f9e3830c3eeb2cc9213b63c720b1af623cb5dcbe2e02de  node.tar.xz"
+      - echo "df450af89261115ef9f9e3830c3eeb2cc9213b63c720b1af623cb5dcbe2e02de node.tar.xz"
         | sha256sum -c -
       - tar xJf node.tar.xz --strip-components=1 -C /usr/local
       - rm node.tar.xz
