@@ -9,13 +9,16 @@ import {
   MISMATCH_TEXT,
   noCuesText,
   notReadText,
+  OCR_START_TEXT,
   OVERLAY_RELEASES,
   pagesReadText,
   pdfLoadedText,
   pdfOpenText,
   playerMessage,
   playerProblem,
+  readingEndMessage,
   readingText,
+  withForceOcr,
 } from '../src/messages';
 
 function state(over: Partial<ClockState>): ClockState {
@@ -127,6 +130,42 @@ describe('file texts', () => {
     expect(noCuesText('sample-eng.pdf')).toBe(
       'No subtitle lines in sample-eng.pdf. Choose an .srt or .vtt file.',
     );
+  });
+});
+
+describe('the end of the reading', () => {
+  const retry = { id: 'retry-reading', text: 'Retry' };
+
+  it('tells that OCR could not start, with Retry', () => {
+    expect(readingEndMessage(40, true)).toEqual({ text: OCR_START_TEXT, action: retry });
+    expect(OCR_START_TEXT).toBe(
+      'OCR could not start. The first OCR run needs a network connection to download the language data.',
+    );
+  });
+
+  it('counts the pages that could not be read, with Retry', () => {
+    expect(readingEndMessage(1, false)).toEqual({
+      text: '1 page could not be read.',
+      action: retry,
+    });
+    expect(readingEndMessage(3, false)).toEqual({
+      text: '3 pages could not be read.',
+      action: retry,
+    });
+    expect(readingEndMessage(0, false)).toBeNull();
+  });
+
+  it('adds the Force OCR note while it is on', () => {
+    expect(withForceOcr(null, false)).toBeNull();
+    expect(withForceOcr(null, true)).toEqual({ text: 'Force OCR is on.' });
+    expect(withForceOcr({ text: 'Reading 1/2 · page 2: OCR 45%' }, true)).toEqual({
+      text: 'Reading 1/2 · page 2: OCR 45% · Force OCR is on',
+    });
+    expect(withForceOcr(readingEndMessage(2, false), true)).toEqual({
+      text: '2 pages could not be read. Force OCR is on.',
+      action: retry,
+    });
+    expect(withForceOcr({ text: 'Reading 1/2' }, false)).toEqual({ text: 'Reading 1/2' });
   });
 });
 

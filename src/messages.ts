@@ -2,10 +2,14 @@
 
 import { PlayerError, type ClockState } from './clock-source';
 
-/** A text, and a link after it. */
+/** The actions of the buttons in the strip. main.ts runs them. */
+export type ActionId = 'retry-reading';
+
+/** A text, and a link or a button after it. */
 export interface Message {
   text: string;
   link?: { href: string; text: string };
+  action?: { id: ActionId; text: string };
 }
 
 export const OVERLAY_RELEASES = 'https://github.com/equwal/subread-overlay/releases/latest';
@@ -79,6 +83,43 @@ export function readingText(read: number, total: number, note: string): string {
 export function pagesReadText(counts: { text: number; ocr: number }): string {
   return `${count(counts.text + counts.ocr, 'page')} read: ${counts.text} text layer, ${counts.ocr} OCR.`;
 }
+
+export const OCR_START_TEXT =
+  'OCR could not start. The first OCR run needs a network connection to download the language data.';
+
+const RETRY = { id: 'retry-reading', text: 'Retry' } as const;
+
+/**
+ * The reading part of the strip after the reading of the pages ends: what
+ * went wrong, with Retry. `failed` is the count of pages that could not be
+ * read. `startFailed` is true when OCR could not start. Null when each page
+ * is read.
+ */
+export function readingEndMessage(failed: number, startFailed: boolean): Message | null {
+  if (startFailed) return { text: OCR_START_TEXT, action: RETRY };
+  if (failed > 0) return { text: `${count(failed, 'page')} could not be read.`, action: RETRY };
+  return null;
+}
+
+export const FORCE_OCR_NOTE = 'Force OCR is on';
+
+/** The reading part of the strip, with the note while Force OCR is on for the open book. */
+export function withForceOcr(m: Message | null, forceOcr: boolean): Message | null {
+  if (!forceOcr) return m;
+  if (m === null) return { text: `${FORCE_OCR_NOTE}.` };
+  const text = m.text.endsWith('.')
+    ? `${m.text} ${FORCE_OCR_NOTE}.`
+    : `${m.text} · ${FORCE_OCR_NOTE}`;
+  return { ...m, text };
+}
+
+/** The question before the saved pages of one book go. */
+export function clearBookQuestion(name: string): string {
+  return `Remove the saved pages of ${name}? The reader reads them again the next time it opens the book.`;
+}
+
+export const CLEAR_ALL_QUESTION =
+  'Remove the saved pages of all books? The reader reads each book again the next time it opens it.';
 
 /** The message for a tap on a page that is not read yet. */
 export function notReadText(read: number, total: number): string {

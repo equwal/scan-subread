@@ -90,6 +90,19 @@ describe('createOcr', () => {
     expect(worker.terminate).toHaveBeenCalledTimes(1);
   });
 
+  it('rejects the page that runs when the OCR stops', async () => {
+    // tesseract.js does not settle a job when its worker stops. The web
+    // finding: a new reading started while the old job still read its page.
+    const worker = fakeWorker();
+    worker.recognize.mockImplementation(() => new Promise(() => undefined));
+    createWorker.mockResolvedValue(worker);
+    const ocr = await createOcr('eng', () => undefined);
+    const page = ocr.recognize({} as HTMLCanvasElement, 0);
+    await ocr.terminate();
+    await expect(page).rejects.toThrow('OCR stopped.');
+    expect(worker.terminate).toHaveBeenCalledTimes(1);
+  }, 1000);
+
   it('gives the error of a page as it is, not as OcrStartError', async () => {
     createWorker.mockResolvedValue(fakeWorker());
     const ocr = await createOcr('eng', () => undefined);

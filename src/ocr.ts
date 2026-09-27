@@ -13,23 +13,15 @@ import workerPath from 'tesseract.js/dist/worker.min.js?url';
 // current browsers have WebAssembly SIMD.
 import corePath from 'tesseract.js-core/tesseract-core-simd-lstm.wasm.js?url';
 import type { OcrToken } from './align';
+import { OcrStartError } from './ocr-job';
 import { pageToTokens } from './ocr-tokens';
 
+export { OcrStartError };
+
 export interface Ocr {
+  /** Rejects when the OCR stops before the page is read. */
   recognize(image: HTMLCanvasElement, pageIndex: number): Promise<OcrToken[]>;
   terminate(): Promise<void>;
-}
-
-/**
- * OCR could not start: the worker script, the core or the language data did
- * not load. `cause` holds the error of tesseract.js. The first OCR run of a
- * language needs the network to download the language data.
- */
-export class OcrStartError extends Error {
-  constructor(cause: unknown) {
-    super(`OCR could not start: ${String(cause)}`, { cause });
-    this.name = 'OcrStartError';
-  }
 }
 
 /**
@@ -52,12 +44,24 @@ export async function createOcr(lang: string, onProgress: (p: number) => void): 
       throw new OcrStartError(err);
     }
   }
+  // tesseract.js does not settle a job that runs when its worker stops. So
+  // each page also waits for the stop, and the reading does not wait for
+  // ever for a page of a stopped worker.
+  let stop: (reason: Error) => void = () => undefined;
+  const stopped = new Promise<never>((_resolve, reject) => {
+    stop = reject;
+  });
+  // A stop while no page runs is no error.
+  stopped.catch(() => undefined);
   return {
-    async recognize(image, pageIndex) {
-      const { data } = await worker.recognize(image, {}, { blocks: true, text: false });
-      return pageToTokens(data, pageIndex);
+    recognize(image, pageIndex) {
+      const page = worker
+        .recognize(image, {}, { blocks: true, text: false })
+        .then(({ data }) => pageToTokens(data, pageIndex));
+      return Promise.race([page, stopped]);
     },
     async terminate() {
+      stop(new Error('OCR stopped.'));
       await worker.terminate();
     },
   };

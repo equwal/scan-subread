@@ -15,6 +15,8 @@ import { follow, type FollowEvent, type FollowMode } from './follower';
 import { lookupText, tapTolerance, tokenAt } from './hit-test';
 import { lineBoxes, padBox } from './line-boxes';
 import {
+  CLEAR_ALL_QUESTION,
+  clearBookQuestion,
   clockText,
   EMPTY_FILE_TEXT,
   errorMessage,
@@ -26,17 +28,20 @@ import {
   pdfLoadedText,
   pdfOpenText,
   playerMessage,
+  readingEndMessage,
   readingText,
   UPDATING_CACHE_TEXT,
+  withForceOcr,
   type Message,
 } from './messages';
 import { setupNav } from './nav';
 import type { Ocr } from './ocr';
+import { OcrStartError, stopOcr } from './ocr-job';
 import { defaultRtl } from './paging';
 import type { PdfDoc } from './pdf';
 import { nextPage } from './read-order';
 import { scrollTarget } from './scroll';
-import { say, showPlayer, showReading } from './status';
+import { onAction, say, showPlayer, showReading } from './status';
 import { isAndroid, SubRead } from './subread';
 import { decodeSubtitles, lastCueAt, parseSubtitles, type Cue } from './subtitles';
 import {
@@ -99,7 +104,8 @@ const ui = {
   dict: el<HTMLSelectElement>('dict'),
   pauseRow: el<HTMLLabelElement>('pause-row'),
   pauseLookup: el<HTMLInputElement>('pause-lookup'),
-  clearCache: el<HTMLButtonElement>('clear-cache'),
+  clearBook: el<HTMLButtonElement>('clear-book'),
+  clearAll: el<HTMLButtonElement>('clear-all'),
   cues: el<HTMLOListElement>('cues'),
   pageLeft: el<HTMLButtonElement>('page-left'),
   pageRight: el<HTMLButtonElement>('page-right'),
@@ -150,6 +156,8 @@ const state = {
   reading: null as Message | string | null,
   /** True while the database is not open after SLOW_DB_MS. */
   dbSlow: false,
+  /** "Force OCR" of the open book: the reading skips the text layer. */
+  forceOcr: false,
   /** True while the player waits for a dictionary lookup that this app paused. */
   lookupPaused: false,
   /** True while a page turn by the user holds the follow. */
@@ -195,7 +203,6 @@ function loadSettings(): void {
   }
   ui.lang.value = settings.get('lang', 'eng');
   ui.subLang.value = settings.get('subLang', 'auto');
-  ui.forceOcr.checked = settings.get('forceOcr', '0') === '1';
   ui.pauseLookup.checked = settings.get('pauseLookup', '1') === '1';
   loadRtl();
 }
@@ -229,10 +236,22 @@ ui.lang.addEventListener('change', () => {
   loadRtl();
   void readBook();
 });
+// Force OCR is a setting of the book. As a global setting it sent each
+// later text PDF through the slow OCR.
 ui.forceOcr.addEventListener('change', () => {
-  settings.set('forceOcr', ui.forceOcr.checked ? '1' : '0');
+  const book = state.book;
+  if (book === null) return;
+  setForceOcr(ui.forceOcr.checked);
+  void putMeta(book, { forceOcr: state.forceOcr });
   void readBook();
 });
+
+/** Sets Force OCR of the open book: the state, the checkbox and the strip. */
+function setForceOcr(on: boolean): void {
+  state.forceOcr = on;
+  ui.forceOcr.checked = on;
+  showReadingPart();
+}
 
 /** Shows a command that failed in the strip. */
 function sayError(err: unknown): void {
@@ -314,6 +333,9 @@ async function openBook(file: File, meta?: BookMeta): Promise<boolean> {
     clearSubtitles();
   }
   const subtitlesSeq = state.subtitlesSeq;
+  setForceOcr(meta?.forceOcr ?? false);
+  ui.forceOcr.disabled = false;
+  ui.clearBook.disabled = false;
   ui.makeSubs.disabled = false;
   ui.empty.hidden = true;
   ui.page.hidden = false;
@@ -354,6 +376,11 @@ function applyMeta(meta: BookMeta, attempt: number, subtitlesSeq: number): void 
   const page = validPage(meta.page, pdf.numPages);
   if (page !== undefined && page !== state.currentPage && state.currentPage === 0) {
     void showPage(page);
+  }
+  const forceOcr = meta.forceOcr ?? false;
+  if (forceOcr !== state.forceOcr) {
+    setForceOcr(forceOcr);
+    void readBook();
   }
   if (state.subtitlesSeq !== subtitlesSeq) return;
   const loaded = state.subtitles ? state.subtitlesBook : undefined;
@@ -451,15 +478,19 @@ function watchDb(): void {
   });
 }
 
-/** The tokens of one page: from the cache, else the text layer, else OCR. */
+/**
+ * The tokens of one page: from the cache, else the text layer, else OCR.
+ * `force` skips the text layer. Rejects with OcrStartError when the page
+ * needs OCR and OCR cannot start.
+ */
 async function readPage(
   pdf: PdfDoc,
   file: File,
   page: number,
+  lang: string,
+  force: boolean,
   ocr: () => Promise<Ocr>,
 ): Promise<PageEntry> {
-  const lang = ui.lang.value;
-  const force = ui.forceOcr.checked;
   if (!force) {
     const cached = await getPage(pageKey(file, page, lang, 'text'));
     if (cached) return cached;
@@ -474,32 +505,55 @@ async function readPage(
       return entry;
     }
   }
+  // OCR starts before the render: when it cannot start, no page is rendered for nothing.
+  const engine = await ocr();
   const canvas = await pdf.renderPage(page, OCR_WIDTH);
-  const tokens = await (await ocr()).recognize(canvas, page);
+  const tokens = await engine.recognize(canvas, page);
   const entry: PageEntry = { tokens, width: canvas.width, height: canvas.height, source: 'ocr' };
   await putPage(pageKey(file, page, lang, 'ocr'), entry);
   return entry;
 }
 
+/** The OCR of the reading that runs now. */
+let readingOcr: { started?: Promise<Ocr> } = {};
+
 /**
  * Reads every page of the book: the current page first, then the pages
  * after it, then the pages before it. The cues are aligned again as pages
  * finish, so the follow starts before the whole book is read.
+ *
+ * A page that cannot be read does not stop the other pages. At the end the
+ * strip tells how many pages could not be read, with Retry. `retry` reads
+ * only the pages that are not read.
  */
-async function readBook(): Promise<void> {
+async function readBook(retry = false): Promise<void> {
   const { pdf, file } = state;
   if (!pdf || !file) return;
   const seq = ++state.readSeq;
-  state.pages = [];
-  state.tokens = [];
-  // The spans index the old tokens, so they go too.
-  state.spans = [];
-  state.cueParts = [];
-  state.markedCue = -1;
+  // The OCR of the reading before stops at once. It does not finish its
+  // page: two quick changes of a setting ran two OCR jobs at the same time.
+  stopOcr(readingOcr.started);
+  const ocr: { started?: Promise<Ocr> } = {};
+  readingOcr = ocr;
+  if (!retry) {
+    state.pages = [];
+    state.tokens = [];
+    // The spans index the old tokens, so they go too.
+    state.spans = [];
+    state.cueParts = [];
+    state.markedCue = -1;
+  }
   const total = pdf.numPages;
-  const pending = new Set(Array.from({ length: total }, (_, i) => i));
+  const pending = new Set(
+    Array.from({ length: total }, (_, i) => i).filter((i) => !state.pages[i]),
+  );
   const counts = { text: 0, ocr: 0 };
+  for (const entry of state.pages) if (entry) counts[entry.source]++;
   const read = (): number => counts.text + counts.ocr;
+  let failed = 0;
+  let startFailed = false;
+  const lang = ui.lang.value;
+  const force = state.forceOcr;
   /** The page that is read now. */
   let page = -1;
   const onOcrProgress = (p: number): void => {
@@ -508,10 +562,13 @@ async function readBook(): Promise<void> {
     }
   };
   // The OCR worker, and tesseract.js itself, load on the first page that needs them.
-  const ocr: { started?: Promise<Ocr> } = {};
   const getOcr = (): Promise<Ocr> => {
-    const lang = ui.lang.value;
-    ocr.started ??= import('./ocr').then(({ createOcr }) => createOcr(lang, onOcrProgress));
+    ocr.started ??= import('./ocr').then(
+      ({ createOcr }) => createOcr(lang, onOcrProgress),
+      (err: unknown) => {
+        throw new OcrStartError(err);
+      },
+    );
     return ocr.started;
   };
   try {
@@ -519,7 +576,21 @@ async function readBook(): Promise<void> {
       page = nextPage(pending, state.currentPage);
       pending.delete(page);
       setReading(readingText(read(), total, `page ${page + 1}`));
-      const entry = await readPage(pdf, file, page, getOcr);
+      let entry: PageEntry;
+      try {
+        entry = await readPage(pdf, file, page, lang, force, getOcr);
+      } catch (err) {
+        if (seq !== state.readSeq) return; // Another book or another setting took over.
+        failed++;
+        // Each page that needs OCR gives the same start error. Tell it once.
+        if (err instanceof OcrStartError) {
+          if (!startFailed) console.warn(err);
+          startFailed = true;
+        } else {
+          console.warn(`Page ${page + 1} could not be read.`, err);
+        }
+        continue;
+      }
       if (seq !== state.readSeq) return; // Another book or another setting took over.
       counts[entry.source]++;
       state.pages[page] = entry;
@@ -534,19 +605,27 @@ async function readBook(): Promise<void> {
     const matched = align();
     say(
       pagesReadText(counts) +
-        (matched === null ? '' : ` ${matchedText(matched, state.cues.length, true)}`),
+        (matched === null ? '' : ` ${matchedText(matched, state.cues.length, failed === 0)}`),
     );
   } catch (err) {
     if (seq === state.readSeq) say(`Cannot read the pages: ${String(err)}`);
   } finally {
-    if (ocr.started) await (await ocr.started).terminate().catch(() => undefined);
-    if (seq === state.readSeq) setReading(null);
+    stopOcr(ocr.started);
+    if (seq === state.readSeq) setReading(readingEndMessage(failed, startFailed));
   }
 }
 
-/** Shows the reading part of the strip: the database notice, else the reading of the pages. */
+/**
+ * Shows the reading part of the strip: the database notice, else the
+ * reading of the pages, with the note while Force OCR is on.
+ */
 function showReadingPart(): void {
-  showReading(state.dbSlow ? UPDATING_CACHE_TEXT : state.reading);
+  if (state.dbSlow) {
+    showReading(UPDATING_CACHE_TEXT);
+    return;
+  }
+  const m = typeof state.reading === 'string' ? { text: state.reading } : state.reading;
+  showReading(withForceOcr(m, state.forceOcr && state.book !== null));
 }
 
 function setReading(m: Message | string | null): void {
@@ -560,9 +639,18 @@ function allPagesRead(): boolean {
   return !!pdf && state.pages.filter((p) => p).length === pdf.numPages;
 }
 
-ui.clearCache.addEventListener('click', async () => {
+// The pages of other books cost hours of OCR, so each clear asks first.
+ui.clearBook.addEventListener('click', async () => {
+  const { book, file } = state;
+  if (book === null || !file || !confirm(clearBookQuestion(file.name))) return;
+  await clearPages(book);
+  say(`The saved pages of ${file.name} are removed.`);
+});
+
+ui.clearAll.addEventListener('click', async () => {
+  if (!confirm(CLEAR_ALL_QUESTION)) return;
   await clearPages();
-  say('Page cache cleared.');
+  say('The saved pages of all books are removed.');
 });
 
 // --- Subtitles ---
@@ -1011,9 +1099,22 @@ ui.dict.addEventListener('change', () => {
   SubRead.setDictionary({ component: ui.dict.value }).catch(sayError);
 });
 
+// --- The buttons in the strip ---
+
+onAction((id) => {
+  switch (id) {
+    case 'retry-reading':
+      void readBook(true);
+      break;
+  }
+});
+
 // --- Start ---
 
 loadSettings();
+// Force OCR and the pages of one book need an open book.
+ui.forceOcr.disabled = true;
+ui.clearBook.disabled = true;
 ui.make.hidden = !isAndroid;
 ui.audioRow.hidden = isAndroid;
 // The web copies a lookup at once: there is no dictionary app to choose or to wait for.

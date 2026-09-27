@@ -159,6 +159,17 @@ body {
   color: inherit;
 }
 
+/* A button after a message, for example Retry. */
+button.action {
+  font: inherit;
+  padding: 0 0.5rem;
+  color: inherit;
+  background: none;
+  border: 1px solid currentColor;
+  border-radius: 4px;
+  cursor: pointer;
+}
+
 #pages-status {
   opacity: 0.8;
 }

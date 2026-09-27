@@ -2,7 +2,7 @@
 // the reading of the pages, and the last event. Only the event part is a
 // live region, because the other parts change often.
 
-import type { Message } from './messages';
+import type { ActionId, Message } from './messages';
 
 /** Milliseconds that an event message stays before it fades. */
 export const EVENT_MS = 6000;
@@ -22,8 +22,11 @@ const event = el('status');
 
 let fadeTimer: ReturnType<typeof setTimeout> | undefined;
 
-/** Writes a message into `target`: the text, then the link. */
-function fill(target: HTMLElement, m: Message): void {
+/**
+ * Writes a message into `target`: the text, then the link or the button. A
+ * click on the button runs the handler of onAction.
+ */
+export function fill(target: HTMLElement, m: Message): void {
   target.textContent = m.text;
   if (m.link) {
     const a = document.createElement('a');
@@ -33,7 +36,29 @@ function fill(target: HTMLElement, m: Message): void {
     a.textContent = m.link.text;
     target.append(' ', a);
   }
+  if (m.action) {
+    const button = document.createElement('button');
+    button.type = 'button';
+    button.className = 'action';
+    button.dataset.action = m.action.id;
+    button.textContent = m.action.text;
+    target.append(' ', button);
+  }
 }
+
+let runAction: ((id: ActionId) => void) | null = null;
+
+/** Sets the handler of the buttons that fill makes. */
+export function onAction(handler: (id: ActionId) => void): void {
+  runAction = handler;
+}
+
+document.addEventListener('click', (e) => {
+  const button = e.target instanceof Element ? e.target.closest('button[data-action]') : null;
+  if (button instanceof HTMLButtonElement && button.dataset.action) {
+    runAction?.(button.dataset.action as ActionId);
+  }
+});
 
 let lastPlayer = '';
 
@@ -41,7 +66,7 @@ let lastPlayer = '';
 export function showPlayer(m: Message | null): void {
   // The clock sends a state four times a second. A new link under the
   // finger can lose a tap, so the part changes only when the text changes.
-  const key = m ? `${m.text}|${m.link?.href ?? ''}` : '';
+  const key = m ? `${m.text}|${m.link?.href ?? ''}|${m.action?.id ?? ''}` : '';
   if (key === lastPlayer) return;
   lastPlayer = key;
   player.hidden = m === null;
