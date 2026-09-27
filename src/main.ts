@@ -9,6 +9,7 @@ import { App } from '@capacitor/app';
 import { createAligner, shiftSpans, type Aligner, type OcrToken, type TokenSpan } from './align';
 import { ankiCard, cardSource } from './anki-card';
 import { backStep, keepScreenOn } from './app-state';
+import { beginOpen, createOpens, endOpen, subtitlesOwner } from './book-open';
 import { resultName, srtName, subreadConcerns, subtitlesOnOpen } from './book-subtitles';
 import { bookText } from './book-text';
 import { LocalAudioClock, OverlayClock, type ClockSource, type ClockState } from './clock-source';
@@ -304,8 +305,8 @@ ui.pdfFile.addEventListener('change', () => {
   void openBook(file);
 });
 
-/** The count of attempts to open a book, and the attempt of the book that is open. */
-const opens = { tried: 0, shown: 0 };
+/** The attempts to open a book, and the attempt of the book that is open. */
+const opens = createOpens();
 
 /**
  * Opens `file` as the book. The book that is open stays until the new
@@ -322,11 +323,13 @@ async function openBook(file: File, meta?: BookMeta): Promise<boolean> {
     say(EMPTY_FILE_TEXT);
     return false;
   }
-  const attempt = ++opens.tried;
+  const attempt = beginOpen(opens);
   let bytes: ArrayBuffer;
   try {
     bytes = await file.arrayBuffer();
   } catch (err) {
+    endOpen(opens, attempt, false);
+    claimSubtitles();
     // The copy of the last book is gone, for example after the storage was cleared.
     say(meta ? LAST_BOOK_GONE_TEXT : `Cannot read ${file.name}: ${String(err)}`);
     return false;
@@ -337,15 +340,17 @@ async function openBook(file: File, meta?: BookMeta): Promise<boolean> {
     const { loadPdf } = await import('./pdf');
     pdf = await loadPdf(bytes);
   } catch (err) {
+    endOpen(opens, attempt, false);
+    claimSubtitles();
     say(pdfOpenText(err));
     return false;
   }
   // A file that the user picked later is open already.
-  if (attempt < opens.shown) {
+  if (!endOpen(opens, attempt, true)) {
     void pdf.destroy();
+    claimSubtitles();
     return false;
   }
-  opens.shown = attempt;
   const key = bookKey(file);
   // The page of the book before goes to its meta data now.
   flushPageSave();
@@ -360,11 +365,12 @@ async function openBook(file: File, meta?: BookMeta): Promise<boolean> {
   state.activeCue = -1;
   state.markedCue = -1;
   state.held = false;
-  // The subtitles of another book go at once. Subtitles that were loaded
-  // while no book was open wait for the meta data of this book.
+  // The subtitles of another book go at once. Subtitles of no book, loaded
+  // while no book was open or while this book loaded, are for this book.
   if (state.subtitles && state.subtitlesBook !== null && state.subtitlesBook !== key) {
     clearSubtitles();
   }
+  claimSubtitles();
   const subtitlesSeq = state.subtitlesSeq;
   // A SubRead job that waits for the pages of another book does not start.
   if (state.makeWait && state.makeWait.book !== key) {
@@ -425,13 +431,10 @@ function applyMeta(meta: BookMeta, attempt: number, subtitlesSeq: number): void 
     const loaded = state.subtitles ? state.subtitlesBook : undefined;
     switch (subtitlesOnOpen(loaded, key, meta.subtitles !== undefined)) {
       case 'keep':
-        if (state.subtitles) {
-          state.subtitlesBook = key;
-          void putMeta(key, { subtitles: state.subtitles });
-        }
+        claimSubtitles();
         break;
       case 'load':
-        if (meta.subtitles) loadSubtitles(meta.subtitles, { save: false });
+        if (meta.subtitles) loadSubtitles(meta.subtitles, { book: key, save: false });
         break;
       case 'clear':
         clearSubtitles();
@@ -706,24 +709,26 @@ ui.clearAll.addEventListener('click', async () => {
 
 /**
  * Loads subtitles from a file, from SubRead or from the meta data of the
- * book. They belong to the open book, or to the book that opens next.
+ * book.
  *
+ * - `book` is the book that they belong to. Null: no book yet, and the
+ *   book that shows when no open loads gets them (claimSubtitles).
  * - `from` names where they came from in the message.
  * - `cues` are the cues of the text, when the caller parsed them already.
- * - `save` keeps them in the meta data of the open book. The default is
- *   true: each file and each SubRead result is kept.
+ * - `save` keeps them in the meta data of `book`. The default is true:
+ *   each file and each SubRead result is kept.
  */
 function loadSubtitles(
   subtitles: BookSubtitles,
-  opts: { from?: string; cues?: Cue[]; save?: boolean } = {},
+  opts: { book: string | null; from?: string; cues?: Cue[]; save?: boolean },
 ): void {
   const cues = opts.cues ?? parseSubtitles(subtitles.text);
   state.cues = cues;
   state.aligner = createAligner(cues.map((c) => c.text));
   state.subtitles = subtitles;
-  state.subtitlesBook = state.book;
+  state.subtitlesBook = opts.book;
   state.subtitlesSeq++;
-  if (opts.save !== false && state.book !== null) void putMeta(state.book, { subtitles });
+  if (opts.save !== false && opts.book !== null) void putMeta(opts.book, { subtitles });
   state.spans = [];
   state.cueParts = [];
   state.activeCue = -1;
@@ -736,6 +741,19 @@ function loadSubtitles(
       (matched === null ? '' : ` ${matchedText(matched, cues.length, allPagesRead())}`),
   );
   showSrtRow();
+}
+
+/**
+ * Gives subtitles of no book to the book that shows, and keeps them in its
+ * meta data. While an open loads that can replace that book, the subtitles
+ * wait (subtitlesOwner). Each end of an open, and the meta data of the new
+ * book, call this again.
+ */
+function claimSubtitles(): void {
+  const book = subtitlesOwner(opens, state.book);
+  if (!state.subtitles || state.subtitlesBook !== null || book === null) return;
+  state.subtitlesBook = book;
+  void putMeta(book, { subtitles: state.subtitles });
 }
 
 /** Removes the subtitles: the cues, the cue list, the mark, the .srt row. */
@@ -782,7 +800,9 @@ ui.subFile.addEventListener('change', async () => {
     say(noCuesText(file.name));
     return;
   }
-  loadSubtitles({ name: file.name, text, source: 'file' }, { cues });
+  // During the open of another book, the file is for the book that shows next.
+  const book = subtitlesOwner(opens, state.book);
+  loadSubtitles({ name: file.name, text, source: 'file' }, { book, cues });
 });
 
 /**
@@ -914,7 +934,7 @@ function offerSubreadSubtitles(
     say('The subtitles of SubRead are not loaded.');
     return false;
   }
-  loadSubtitles(subreadSubtitles(book, srt), { from: 'SubRead' });
+  loadSubtitles(subreadSubtitles(book, srt), { book, from: 'SubRead' });
   return true;
 }
 

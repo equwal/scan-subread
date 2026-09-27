@@ -61,7 +61,9 @@ the start card.
 
 Subtitles belong to a book. Another book opens with its own subtitles,
 or with none. Subtitles that you load while no book is open are for the
-book that you open next. The page goes to the meta data of the book one
+book that you open next. Subtitles that you load while a new book loads
+are for that book. When the new book does not open, they are for the
+book that stays open. The page goes to the meta data of the book one
 second after it changes.
 
 The first start after an upgrade from a build with the old dictionary
@@ -468,6 +470,8 @@ in a browser bundle.
 - `src/messages.ts`: pure texts of the status strip.
 - `src/read-order.ts`: pure order in which the pages are read.
 - `src/book-text.ts`: pure tokens to the book text for SubRead.
+- `src/book-open.ts`: pure rules for the open of a book: the open
+  attempts, and the book of subtitles that load during an open.
 - `src/book-subtitles.ts`: pure rules for the subtitles of a book: the
   subtitles when a book opens, the result file name for SubRead, and the
   checks before a SubRead result loads.
