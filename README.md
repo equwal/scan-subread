@@ -23,6 +23,23 @@ dictionary of your choice. Press a word for half a second, and SubRead
 Anki makes a card. The player pauses while the dictionary or the card
 is open.
 
+<p>
+  <img src="fastlane/metadata/android/en-US/images/phoneScreenshots/1.png" width="200" alt="A text PDF: the line that the narrator reads is marked in yellow">
+  <img src="fastlane/metadata/android/en-US/images/phoneScreenshots/2.png" width="200" alt="A Japanese scan: OCR read the page, and the current line is marked">
+  <img src="fastlane/metadata/android/en-US/images/phoneScreenshots/3.png" width="200" alt="After a page turn by hand, the page stops following, and the Follow button brings it back">
+  <img src="fastlane/metadata/android/en-US/images/phoneScreenshots/4.png" width="200" alt="The start card with the checklist of the SubRead suite">
+</p>
+
+## Install
+
+On Android, download `Scan-SubRead-<version>.apk` from the
+[latest release](https://github.com/equwal/scan-subread/releases/latest)
+and open it. The release APKs have the signature of the SubRead suite. A
+debug build from your own PC has a different signature: uninstall it
+first. This deletes the pages and the books that the app keeps.
+
+In a browser, build and serve the web app (see "Run").
+
 ## How to use it
 
 1. Press "Open a PDF" on the start card, or open the menu (the `☰`
