@@ -22,6 +22,7 @@ import {
   playerProblem,
   readingEndMessage,
   readingText,
+  keptResultText,
   shownInPlayerPart,
   subreadErrorText,
   subreadQuestion,
@@ -286,6 +287,12 @@ describe('SubRead texts', () => {
     expect(subreadResultText({})).toBe('? cues, language ?.');
     expect(subreadResultText({ cues: -1, language: null, matchRate: -1 })).toBe(
       '? cues, language ?.',
+    );
+  });
+
+  it('tells that the result for a book that is not open waits for that book', () => {
+    expect(keptResultText('neko.pdf')).toBe(
+      'SubRead made the subtitles of neko.pdf. The reader offers them when you open that book.',
     );
   });
 

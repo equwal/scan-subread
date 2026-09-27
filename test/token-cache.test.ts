@@ -128,6 +128,24 @@ describe('token cache', () => {
     expect(await cache.getMeta('inu.pdf|20')).toEqual({});
   });
 
+  it('keeps a SubRead result for a book apart from its subtitles', async () => {
+    // The finding: a SubRead result for a book that was not open went into
+    // its subtitles, without the confirm and the checks of the language and
+    // the match rate. It now waits as a result, and the subtitles stay.
+    const cache = await freshCache();
+    const subtitles: BookSubtitles = { name: 'neko.srt', text: srt, source: 'file' };
+    const result = { srt: '1\n00:00:00,000 --> 00:00:01,000\nx\n', cues: 23, language: 'km' };
+    await cache.putMeta('neko.pdf|10', { subtitles });
+    await cache.putMeta('neko.pdf|10', { subread: { ...result, matchRate: 1 } });
+    expect(await cache.getMeta('neko.pdf|10')).toEqual({
+      subtitles,
+      subread: { ...result, matchRate: 1 },
+    });
+    // The offer of the result removes it.
+    await cache.putMeta('neko.pdf|10', { subread: undefined });
+    expect(await cache.getMeta('neko.pdf|10')).toEqual({ subtitles });
+  });
+
   it('keeps the fields of two merges at the same time', async () => {
     const cache = await freshCache();
     await Promise.all([

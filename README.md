@@ -96,6 +96,9 @@ make before then stays.
 - Before the subtitles of SubRead load, the app asks when they replace
   a file that you loaded, when SubRead found another language than the
   one of the book, and when it found less than 80% of the lines.
+- A SubRead result for a book that is not open waits in the meta data of
+  that book. When you open the book, the app offers it with the same
+  questions.
 
 ### The status strip
 

@@ -41,6 +41,7 @@ import {
   clockText,
   EMPTY_FILE_TEXT,
   errorMessage,
+  keptResultText,
   LAST_BOOK_GONE_TEXT,
   matchedText,
   noCuesText,
@@ -87,6 +88,7 @@ import {
   putPage,
   type BookMeta,
   type BookSubtitles,
+  type KeptResult,
   type PageEntry,
 } from './token-cache';
 import { createPageView, type Marks } from './view';
@@ -469,8 +471,14 @@ function applyMeta(meta: BookMeta, attempt: number, subtitlesSeq: number): void 
         break;
     }
   }
-  // After the saved subtitles: a SubRead result for a book with a file of
-  // the user asks first.
+  // After the saved subtitles, so that a SubRead result asks first when it
+  // replaces a file of the user. A result that came while another book was
+  // open gets the same offer as the result for the open book.
+  const kept = meta.subread;
+  if (kept) {
+    void putMeta(key, { subread: undefined });
+    if (offerSubreadSubtitles(kept.srt, kept)) ui.makeStatus.textContent = subreadResultText(kept);
+  }
   void checkPendingSubtitles();
 }
 
@@ -928,11 +936,6 @@ async function makeSubtitles(audio: { uri: string; name: string }, book: string)
     state.making = null;
     ui.makeSubs.disabled = state.book === null;
   }
-  // The result file waits for its book: pendingSubtitles loads it when the book opens.
-  if (state.book !== book) {
-    ui.makeStatus.textContent = 'SubRead finished, but another book is open now.';
-    return;
-  }
   if (result.error === 'not_installed') {
     fill(ui.makeStatus, SUBREAD_NOT_INSTALLED);
     return;
@@ -945,12 +948,25 @@ async function makeSubtitles(audio: { uri: string; name: string }, book: string)
     ui.makeStatus.textContent = subreadErrorText(result.error ?? 'no file');
     return;
   }
+  // Another book opened during the job: the result waits for its book,
+  // with what SubRead told about it, for the checks of the offer.
   if (state.book !== book) {
-    void putMeta(book, { subtitles: subreadSubtitles(book, srt) });
+    const { cues, matchRate, language } = result;
+    keepResult(book, { srt, cues, matchRate, language });
     return;
   }
   ui.makeStatus.textContent = subreadResultText(result);
   offerSubreadSubtitles(srt, result);
+}
+
+/**
+ * Keeps a SubRead result for the book `book`, which is not open, in its
+ * meta data. It is not saved as the subtitles of the book: applyMeta
+ * offers it when the book opens, with the confirm and the checks.
+ */
+function keepResult(book: string, kept: KeptResult): void {
+  void putMeta(book, { subread: kept });
+  ui.makeStatus.textContent = keptResultText(bookName(book));
 }
 
 type PendingSrt = { srt?: string };
@@ -1004,9 +1020,9 @@ async function checkPendingSubtitles(): Promise<void> {
   }
   const srt = pending.srt;
   if (srt === undefined) return;
-  // The call removed the file, so the .srt goes to the meta data of its book.
+  // The call removed the file, so the .srt waits in the meta data of its book.
   if (state.book !== book) {
-    void putMeta(book, { subtitles: subreadSubtitles(book, srt) });
+    keepResult(book, { srt });
     return;
   }
   if (offerSubreadSubtitles(srt, {})) {

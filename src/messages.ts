@@ -216,6 +216,11 @@ export function subreadResultText(r: {
   );
 }
 
+/** SubRead made the subtitles of the book `name`, which is not open. They wait for that book. */
+export function keptResultText(name: string): string {
+  return `SubRead made the subtitles of ${name}. The reader offers them when you open that book.`;
+}
+
 /** Why SubRead made no subtitles. `cannot_start` means that the read grant of the audio is gone. */
 export function subreadErrorText(error: string): string {
   if (error.startsWith('cannot_start')) {

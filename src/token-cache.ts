@@ -44,6 +44,22 @@ export interface BookSubtitles {
   source: 'file' | 'subread';
 }
 
+/**
+ * A SubRead result that came while another book was open. It waits in the
+ * meta data of its book, and the reader offers it, with the confirm and the
+ * checks, when the book opens (see subreadConcerns).
+ */
+export interface KeptResult {
+  /** The text of the .srt. */
+  srt: string;
+  /** The number of cues, when SubRead told it. */
+  cues?: number;
+  /** 0 to 1: the share of the lines that SubRead found in the book, when it told it. */
+  matchRate?: number;
+  /** The language that SubRead found, when it told it. */
+  language?: string | null;
+}
+
 /** What the reader keeps for a book, other than its pages. */
 export interface BookMeta {
   /** The page that was open. 0 is the first page. */
@@ -51,6 +67,8 @@ export interface BookMeta {
   subtitles?: BookSubtitles;
   /** The "Force OCR" setting for the book. */
   forceOcr?: boolean;
+  /** A SubRead result that waits for the next open of the book. */
+  subread?: KeptResult;
 }
 
 /** The record of the last book. */
