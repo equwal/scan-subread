@@ -6,6 +6,7 @@
 // (the strip) and view.ts (the page).
 
 import { createAligner, type Aligner, type OcrToken, type TokenSpan } from './align';
+import { srtName } from './book-subtitles';
 import { bookText } from './book-text';
 import { LocalAudioClock, OverlayClock, type ClockSource, type ClockState } from './clock-source';
 import { audioPage, cueParts, cueProgress, pageStartTime, type CueParts } from './cue-pages';
@@ -15,10 +16,14 @@ import { lookupText, tapTolerance, tokenAt } from './hit-test';
 import { lineBoxes, padBox } from './line-boxes';
 import {
   clockText,
+  EMPTY_FILE_TEXT,
   errorMessage,
+  matchedText,
+  noCuesText,
   notReadText,
   pagesReadText,
   pdfLoadedText,
+  pdfOpenText,
   playerMessage,
   readingText,
 } from './messages';
@@ -30,7 +35,7 @@ import { nextPage } from './read-order';
 import { scrollTarget } from './scroll';
 import { say, showPlayer, showReading } from './status';
 import { isAndroid, SubRead } from './subread';
-import { lastCueAt, parseSubtitles, type Cue } from './subtitles';
+import { decodeSubtitles, lastCueAt, parseSubtitles, type Cue } from './subtitles';
 import {
   bookKey,
   clearPages,
@@ -39,6 +44,7 @@ import {
   pageKey,
   putPage,
   putSrt,
+  type BookSubtitles,
   type PageEntry,
 } from './token-cache';
 import { createPageView, type Marks } from './view';
@@ -118,7 +124,8 @@ const state = {
   clock: null as ClockState | null,
   readSeq: 0,
   alignTimer: null as ReturnType<typeof setTimeout> | null,
-  srt: null as string | null,
+  /** The subtitles that are loaded, or null. */
+  subtitles: null as BookSubtitles | null,
   /** True while the player waits for a dictionary lookup that this app paused. */
   lookupPaused: false,
   /** True while a page turn by the user holds the follow. */
@@ -212,37 +219,74 @@ function sayError(err: unknown): void {
 
 ui.openPdf.addEventListener('click', () => ui.pdfFile.click());
 
-ui.pdfFile.addEventListener('change', async () => {
+ui.pdfFile.addEventListener('change', () => {
   const file = ui.pdfFile.files?.[0];
+  // The same file can be picked again.
+  ui.pdfFile.value = '';
   if (!file) return;
   drawer.closeOnPhone();
+  void openBook(file);
+});
+
+/** The count of attempts to open a book, and the attempt of the book that is open. */
+const opens = { tried: 0, shown: 0 };
+
+/**
+ * Opens `file` as the book. The book that is open stays until the new
+ * file loads: a file that is not a PDF, or is damaged, changes nothing.
+ * Gives true when the new book is open.
+ */
+async function openBook(file: File): Promise<boolean> {
+  if (file.size === 0) {
+    say(EMPTY_FILE_TEXT);
+    return false;
+  }
+  const attempt = ++opens.tried;
+  let pdf: PdfDoc;
   try {
-    state.readSeq++;
-    await state.pdf?.destroy();
     // pdf.js loads with the first PDF, so the start card shows sooner.
     const { loadPdf } = await import('./pdf');
-    state.pdf = await loadPdf(await file.arrayBuffer());
-    state.file = file;
-    state.pages = [];
-    state.tokens = [];
-    state.spans = [];
-    state.cueParts = [];
-    state.activeCue = -1;
-    state.markedCue = -1;
-    state.held = false;
-    ui.makeSubs.disabled = false;
-    ui.empty.hidden = true;
-    ui.page.hidden = false;
-    if (state.clock) showPlayerStatus(state.clock);
-    say(pdfLoadedText(state.pdf.numPages));
-    await showPage(0);
-    const saved = await getSrt(bookKey(file));
-    if (saved) loadSubtitles(saved, 'the last SubRead run');
-    void readBook();
+    pdf = await loadPdf(await file.arrayBuffer());
   } catch (err) {
-    say(`Cannot open PDF: ${String(err)}`);
+    say(pdfOpenText(err));
+    return false;
   }
-});
+  // A file that the user picked later is open already.
+  if (attempt < opens.shown) {
+    void pdf.destroy();
+    return false;
+  }
+  opens.shown = attempt;
+  const old = state.pdf;
+  state.pdf = pdf;
+  state.file = file;
+  state.pages = [];
+  state.tokens = [];
+  state.spans = [];
+  state.cueParts = [];
+  state.activeCue = -1;
+  state.markedCue = -1;
+  state.held = false;
+  ui.makeSubs.disabled = false;
+  ui.empty.hidden = true;
+  ui.page.hidden = false;
+  if (state.clock) showPlayerStatus(state.clock);
+  say(pdfLoadedText(pdf.numPages));
+  // showPage sets the current page at once, so the reading starts there.
+  void showPage(0);
+  // readBook stops the reading of the old book before its document closes.
+  void readBook();
+  void old?.destroy();
+  showSrtRow();
+  const saved = await getSrt(bookKey(file));
+  if (saved && state.file === file) {
+    loadSubtitles(
+      { name: srtName(file.name), text: saved, source: 'subread' },
+      'the last SubRead run',
+    );
+  }
+  return true;
+}
 
 /** The tokens of one page: from the cache, else the text layer, else OCR. */
 async function readPage(
@@ -327,7 +371,7 @@ async function readBook(): Promise<void> {
     const matched = align();
     say(
       pagesReadText(counts) +
-        (matched === null ? '' : ` ${matched}/${state.cues.length} cues matched.`),
+        (matched === null ? '' : ` ${matchedText(matched, state.cues.length, true)}`),
     );
   } catch (err) {
     if (seq === state.readSeq) say(`Cannot read the pages: ${String(err)}`);
@@ -350,11 +394,19 @@ ui.clearCache.addEventListener('click', async () => {
 
 // --- Subtitles ---
 
-/** Load subtitles from a file or from SubRead. `source` names where they came from. */
-function loadSubtitles(text: string, source: string): void {
-  state.cues = parseSubtitles(text);
-  state.aligner = createAligner(state.cues.map((c) => c.text));
-  state.srt = text;
+/**
+ * Loads subtitles from a file or from SubRead. `from` names where they
+ * came from in the message. `cues` are the cues of the text, when the
+ * caller parsed them already.
+ */
+function loadSubtitles(
+  subtitles: BookSubtitles,
+  from = subtitles.name,
+  cues = parseSubtitles(subtitles.text),
+): void {
+  state.cues = cues;
+  state.aligner = createAligner(cues.map((c) => c.text));
+  state.subtitles = subtitles;
   state.spans = [];
   state.cueParts = [];
   state.activeCue = -1;
@@ -363,22 +415,51 @@ function loadSubtitles(text: string, source: string): void {
   renderCueList();
   const matched = align();
   say(
-    `${state.cues.length} cues loaded from ${source}.` +
-      (matched === null ? '' : ` ${matched} matched to the pages read so far.`),
+    `${cues.length} cues loaded from ${from}.` +
+      (matched === null ? '' : ` ${matchedText(matched, cues.length, allPagesRead())}`),
   );
-  offerSrt(text);
+  showSrtRow();
 }
 
+// A browser download of an .srt often has the type application/octet-stream,
+// and a type filter makes such a file grey in the Android picker. So the
+// field takes each file, and the parser decides.
 ui.subFile.addEventListener('change', async () => {
   const file = ui.subFile.files?.[0];
+  // The same file can be picked again.
+  ui.subFile.value = '';
   if (!file) return;
   drawer.closeOnPhone();
-  loadSubtitles(await file.text(), file.name);
+  if (file.size === 0) {
+    say(EMPTY_FILE_TEXT);
+    return;
+  }
+  let text: string;
+  try {
+    text = decodeSubtitles(await file.arrayBuffer());
+  } catch (err) {
+    say(`Cannot read ${file.name}: ${String(err)}`);
+    return;
+  }
+  // A file with no cues, for example a PDF, keeps the cues that are loaded.
+  const cues = parseSubtitles(text);
+  if (cues.length === 0) {
+    say(noCuesText(file.name));
+    return;
+  }
+  loadSubtitles({ name: file.name, text, source: 'file' }, file.name, cues);
 });
 
-function offerSrt(text: string): void {
-  const name = `${(state.file?.name ?? 'book').replace(/\.pdf$/i, '')}.srt`;
-  ui.srtRow.hidden = false;
+/**
+ * The .srt row shows for subtitles that SubRead made: a download on the
+ * web, the share sheet on Android. A file that the user loaded is on the
+ * device already.
+ */
+function showSrtRow(): void {
+  const subtitles = state.subtitles;
+  ui.srtRow.hidden = subtitles?.source !== 'subread';
+  if (!subtitles || ui.srtRow.hidden) return;
+  const { name, text } = subtitles;
   ui.srtDownload.hidden = isAndroid;
   ui.srtShare.hidden = !isAndroid;
   if (!isAndroid) {
@@ -431,7 +512,7 @@ ui.makeSubs.addEventListener('click', async () => {
       ? ' Under 80% usually means another edition or the wrong language.'
       : '');
   await putSrt(bookKey(file), result.srt);
-  loadSubtitles(result.srt, 'SubRead');
+  loadSubtitles({ name: srtName(file.name), text: result.srt, source: 'subread' }, 'SubRead');
 });
 
 // --- Alignment ---
@@ -628,7 +709,12 @@ async function showPage(index: number): Promise<void> {
   if (!pdf || index < 0 || index >= pdf.numPages) return;
   state.currentPage = index;
   nav.update();
-  await view.show(pdf, index);
+  try {
+    await view.show(pdf, index);
+  } catch (err) {
+    // A render of a book that closed meanwhile fails. That is no error.
+    if (state.pdf === pdf) sayError(err);
+  }
 }
 
 // --- Tap on a word ---

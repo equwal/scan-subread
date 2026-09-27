@@ -84,3 +84,37 @@ export function pagesReadText(counts: { text: number; ocr: number }): string {
 export function notReadText(read: number, total: number): string {
   return `This page is not read yet (${read}/${total} read).`;
 }
+
+/** A picked file of 0 bytes, for example a file that another app still writes. */
+export const EMPTY_FILE_TEXT = 'The file is empty or not ready. Try again in a moment.';
+
+/** The message when pdf.js cannot open a file. */
+export function pdfOpenText(err: unknown): string {
+  if (err instanceof Error && err.name === 'InvalidPDFException') {
+    return 'This file is not a PDF, or it is damaged.';
+  }
+  return `Cannot open the PDF: ${String(err)}`;
+}
+
+/** The message for a subtitle file with no cues, for example a PDF. */
+export function noCuesText(name: string): string {
+  return `No subtitle lines in ${name}. Choose an .srt or .vtt file.`;
+}
+
+/**
+ * When all pages are read and less than this share of the cues is
+ * matched, the subtitles are for another text or another language.
+ */
+export const MISMATCH_SHARE = 0.3;
+
+export const MISMATCH_TEXT = 'These subtitles do not match this book or the OCR language.';
+
+/**
+ * The count of matched cues. When all pages are read and less than
+ * MISMATCH_SHARE of the cues is matched, the hint follows.
+ */
+export function matchedText(matched: number, cues: number, allRead: boolean): string {
+  if (!allRead) return `${matched}/${cues} cues matched to the pages read so far.`;
+  const text = `${matched}/${cues} cues matched.`;
+  return cues > 0 && matched / cues < MISMATCH_SHARE ? `${text} ${MISMATCH_TEXT}` : text;
+}

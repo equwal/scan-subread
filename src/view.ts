@@ -168,7 +168,8 @@ export function createPageView(
       const dpr = window.devicePixelRatio || 1;
       const width = ui.page.clientWidth;
       if (width > 0 && (Math.abs(width - shown.cssWidth) >= 1 || dpr !== shown.dpr)) {
-        void render();
+        // A render of a closed document fails. The stretched canvas stays.
+        render().catch(() => undefined);
       }
     }, RESIZE_MS);
   }).observe(ui.viewer);

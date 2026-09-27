@@ -1,12 +1,18 @@
+import fc from 'fast-check';
 import { describe, expect, it } from 'vitest';
 import { PlayerError, type ClockState } from '../src/clock-source';
 import {
   clockText,
   errorMessage,
+  matchedText,
+  MISMATCH_SHARE,
+  MISMATCH_TEXT,
+  noCuesText,
   notReadText,
   OVERLAY_RELEASES,
   pagesReadText,
   pdfLoadedText,
+  pdfOpenText,
   playerMessage,
   playerProblem,
   readingText,
@@ -96,5 +102,60 @@ describe('page texts', () => {
     expect(readingText(3, 40, '')).toBe('Reading 3/40');
     expect(readingText(3, 40, 'page 5: OCR 45%')).toBe('Reading 3/40 · page 5: OCR 45%');
     expect(notReadText(3, 40)).toBe('This page is not read yet (3/40 read).');
+  });
+});
+
+/** The error of pdf.js 6 for a file that is not a PDF: a PNG, an .srt, or a cut PDF. */
+function invalidPdf(): Error {
+  const err = new Error('Invalid PDF structure.');
+  err.name = 'InvalidPDFException';
+  return err;
+}
+
+describe('file texts', () => {
+  it('says that a file is not a PDF, with no exception text', () => {
+    expect(pdfOpenText(invalidPdf())).toBe('This file is not a PDF, or it is damaged.');
+  });
+
+  it('gives another error of pdf.js as it is', () => {
+    expect(pdfOpenText(new Error('Worker was destroyed'))).toBe(
+      'Cannot open the PDF: Error: Worker was destroyed',
+    );
+  });
+
+  it('names the subtitle file with no cues', () => {
+    expect(noCuesText('sample-eng.pdf')).toBe(
+      'No subtitle lines in sample-eng.pdf. Choose an .srt or .vtt file.',
+    );
+  });
+});
+
+describe('matchedText', () => {
+  it('counts the matched cues of the pages read so far', () => {
+    expect(matchedText(2, 15, false)).toBe('2/15 cues matched to the pages read so far.');
+  });
+
+  it('adds the hint when all pages are read and less than 30% of the cues match', () => {
+    // sample-jpn.srt on the English PDF.
+    expect(matchedText(0, 3, true)).toBe(`0/3 cues matched. ${MISMATCH_TEXT}`);
+    expect(matchedText(4, 15, true)).toBe(`4/15 cues matched. ${MISMATCH_TEXT}`);
+    expect(matchedText(5, 15, true)).toBe('5/15 cues matched.');
+    expect(matchedText(15, 15, true)).toBe('15/15 cues matched.');
+  });
+
+  it('gives the hint exactly for all pages read and less than 30% matched', () => {
+    expect(MISMATCH_SHARE).toBe(0.3);
+    // 3 of 10 is 30%: no hint. In floating point 0.3 * 10 is more than 3.
+    expect(matchedText(3, 10, true)).toBe('3/10 cues matched.');
+    const counts = fc
+      .tuple(fc.nat({ max: 500 }), fc.nat({ max: 500 }))
+      .map(([a, b]) => ({ matched: Math.min(a, b), cues: Math.max(a, b) }));
+    fc.assert(
+      fc.property(counts, fc.boolean(), ({ matched, cues }, allRead) => {
+        const hint = matchedText(matched, cues, allRead).endsWith(MISMATCH_TEXT);
+        // Whole numbers: 10 * matched < 3 * cues is exact.
+        expect(hint).toBe(allRead && 10 * matched < 3 * cues);
+      }),
+    );
   });
 });
