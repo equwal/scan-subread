@@ -9,7 +9,7 @@ import { App } from '@capacitor/app';
 import { createAligner, shiftSpans, type Aligner, type OcrToken, type TokenSpan } from './align';
 import { ankiCard, cardSource } from './anki-card';
 import { backStep, keepScreenOn } from './app-state';
-import { beginOpen, createOpens, endOpen, subtitlesOwner } from './book-open';
+import { beginOpen, createOpens, endOpen, subtitlesOwner, userOpened } from './book-open';
 import { resultName, srtName, subreadConcerns, subtitlesOnOpen } from './book-subtitles';
 import { bookText } from './book-text';
 import { LocalAudioClock, OverlayClock, type ClockSource, type ClockState } from './clock-source';
@@ -313,17 +313,19 @@ const opens = createOpens();
  * file loads: a file that is not a PDF, or is damaged, changes nothing.
  *
  * `meta` is what the reader keeps for the book, when the caller has it:
- * the book opens at its page. Else the meta data comes from IndexedDB
- * after the open. The page shows and the reading starts at once, and the
- * meta data applies when it comes: an upgrade of the database can hold
- * IndexedDB for many seconds. Gives true when the new book is open.
+ * the book opens at its page. Only the restore of the last book gives it,
+ * so an open without it is a file that the user picked. Else the meta data
+ * comes from IndexedDB after the open. The page shows and the reading
+ * starts at once, and the meta data applies when it comes: an upgrade of
+ * the database can hold IndexedDB for many seconds. Gives true when the new
+ * book is open.
  */
 async function openBook(file: File, meta?: BookMeta): Promise<boolean> {
   if (file.size === 0) {
     say(EMPTY_FILE_TEXT);
     return false;
   }
-  const attempt = beginOpen(opens);
+  const attempt = beginOpen(opens, meta === undefined);
   let bytes: ArrayBuffer;
   try {
     bytes = await file.arrayBuffer();
@@ -485,20 +487,26 @@ function showStart(): void {
  * Opens the last book at its page, with its subtitles. Android stops the
  * reader while the user is in the dictionary or in the player app, and a
  * reload forgets the file that the user opened.
+ *
+ * A book that the user opens while the restore waits for the database
+ * wins, also while it still loads (userOpened).
  */
 async function restoreLastBook(): Promise<void> {
+  const since = opens.byUser;
   const file = await getLastBook();
-  // The user opened a book while the database was busy.
-  if (state.pdf) return;
-  if (!file) {
+  if (!file || userOpened(opens, since)) {
     showStart();
     return;
   }
   const meta = await getMeta(bookKey(file));
-  if (state.pdf) return;
+  if (userOpened(opens, since)) {
+    showStart();
+    return;
+  }
   if (await openBook(file, meta)) return;
-  // The copy cannot be read, or it is no PDF now: forget it.
-  await clearLastBook();
+  // The copy cannot be read, or it is no PDF now: forget it. After an open
+  // by the user, the copy can be of the user's book, so it stays.
+  if (!userOpened(opens, since)) await clearLastBook(bookKey(file));
   showStart();
 }
 

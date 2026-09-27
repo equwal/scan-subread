@@ -198,9 +198,21 @@ export function getLastBook(): Promise<File | undefined> {
   });
 }
 
-/** Removes the copy of the last book, for example when its data cannot be read. */
-export async function clearLastBook(): Promise<void> {
-  await tryDb((d) => d.delete('books', LAST));
+/**
+ * Removes the copy of the last book, for example when its data cannot be
+ * read, but only while the copy is of the book `key` (see bookKey). The copy
+ * of another book stays: the user can open a book while the restore of the
+ * last book runs, and the copy of that book replaces the last book.
+ */
+export async function clearLastBook(key: string): Promise<void> {
+  await tryDb((d) => {
+    // One transaction reads and deletes, so a new copy cannot come between.
+    const tx = d.transaction('books', 'readwrite');
+    const remove = async (): Promise<void> => {
+      if ((await tx.store.get(LAST))?.key === key) await tx.store.delete(LAST);
+    };
+    return Promise.all([remove(), tx.done]);
+  });
 }
 
 /**

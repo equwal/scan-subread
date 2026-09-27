@@ -57,7 +57,9 @@ its page, with its subtitles, without a picker. Android stops the
 reader while you are in the dictionary or in the player app, and the
 reader comes back where you were. When the copy cannot be read, for
 example after the app storage was cleared, the app forgets it and shows
-the start card.
+the start card. A book that you open while the last book loads, or while
+the start waits for the database, wins: the app does not open the last
+book over it, and it keeps the copy of your book.
 
 Subtitles belong to a book. Another book opens with its own subtitles,
 or with none. Subtitles that you load while no book is open are for the

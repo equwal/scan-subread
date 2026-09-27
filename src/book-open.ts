@@ -1,5 +1,5 @@
-// The open of a book: the open attempts, and the owner of subtitles that
-// load during an open. Pure: no DOM.
+// The open of a book: the open attempts, the owner of subtitles that load
+// during an open, and the restore of the last book. Pure: no DOM.
 
 /**
  * The open attempts of books. Each attempt gets the next number: 1, 2, 3 ...
@@ -11,17 +11,20 @@ export interface Opens {
   tried: number;
   /** The attempt of the book that shows, or 0. */
   shown: number;
+  /** The count of attempts that the user started: a file of the file picker. */
+  byUser: number;
   /** The attempts that still load. */
   loading: Set<number>;
 }
 
 export function createOpens(): Opens {
-  return { tried: 0, shown: 0, loading: new Set() };
+  return { tried: 0, shown: 0, byUser: 0, loading: new Set() };
 }
 
-/** Starts an attempt, and gives its number. */
-export function beginOpen(o: Opens): number {
+/** Starts an attempt, and gives its number. `byUser` is true for a file that the user picked. */
+export function beginOpen(o: Opens, byUser: boolean): number {
   const attempt = ++o.tried;
+  if (byUser) o.byUser++;
   o.loading.add(attempt);
   return attempt;
 }
@@ -54,4 +57,16 @@ export function opening(o: Opens): boolean {
  */
 export function subtitlesOwner(o: Opens, book: string | null): string | null {
   return opening(o) ? null : book;
+}
+
+/**
+ * True when the user started an open after `since`, the value of o.byUser
+ * when the restore of the last book started. The restore waits for the
+ * database, and the first open after an upgrade can take many seconds. A
+ * book that the user picks meanwhile wins: the restore does not open the
+ * last book over it, also while it still loads, and does not forget the copy
+ * of the last book, because the copy can be of the user's book now.
+ */
+export function userOpened(o: Opens, since: number): boolean {
+  return o.byUser !== since;
 }

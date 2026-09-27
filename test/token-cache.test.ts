@@ -143,12 +143,26 @@ describe('token cache', () => {
     await cache.putLastBook(neko);
     await cache.putMeta(cache.bookKey(neko), { page: 2 });
     await cache.putPage(cache.pageKey(neko, 0, 'jpn', 'ocr'), entry);
-    await cache.clearLastBook();
+    await cache.clearLastBook(cache.bookKey(neko));
     expect(await cache.getLastBook()).toBeUndefined();
     expect(await cache.getMeta(cache.bookKey(neko))).toEqual({ page: 2 });
     expect(await cache.getPage(cache.pageKey(neko, 0, 'jpn', 'ocr'))).toEqual(entry);
     // No last book: nothing to forget.
-    await expect(cache.clearLastBook()).resolves.toBeUndefined();
+    await expect(cache.clearLastBook(cache.bookKey(neko))).resolves.toBeUndefined();
+  });
+
+  it('forgets the last book only while the copy is of that book', async () => {
+    // The finding: the restore of the last book failed after the user had
+    // opened another book, and it deleted the copy of the user's book.
+    const cache = await freshCache();
+    const last = new File(['%PDF-1.7 猫'], 'neko.pdf', { type: 'application/pdf' });
+    const picked = new File(['%PDF-1.7 犬と猫'], 'inu.pdf', { type: 'application/pdf' });
+    await cache.putLastBook(last);
+    await cache.putLastBook(picked);
+    await cache.clearLastBook(cache.bookKey(last));
+    expect((await cache.getLastBook())?.name).toBe('inu.pdf');
+    await cache.clearLastBook(cache.bookKey(picked));
+    expect(await cache.getLastBook()).toBeUndefined();
   });
 
   it('tells when the database is open, after the upgrade', async () => {
@@ -229,7 +243,7 @@ describe('token cache', () => {
     await expect(cache.putMeta('b', { page: 1 })).resolves.toBeUndefined();
     await expect(cache.putLastBook(new File(['x'], 'b.pdf'))).resolves.toBe(false);
     await expect(cache.getLastBook()).resolves.toBeUndefined();
-    await expect(cache.clearLastBook()).resolves.toBeUndefined();
+    await expect(cache.clearLastBook('b.pdf|1')).resolves.toBeUndefined();
     await expect(cache.dbReady()).resolves.toBeUndefined();
     expect(warn).toHaveBeenCalledTimes(1);
   });

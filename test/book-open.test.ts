@@ -6,14 +6,18 @@ import {
   endOpen,
   opening,
   subtitlesOwner,
+  userOpened,
   type Opens,
 } from '../src/book-open';
 
 /** One step of a script of opens: start the next attempt, or end one that loads. */
 interface Step {
   begin: boolean;
-  /** The attempt that ends, when `begin` is false. */
+  /** The attempt that starts or ends. */
   attempt: number;
+  /** For a start: the user picked the file. */
+  byUser: boolean;
+  /** For an end: the file loaded as a PDF. */
   loaded: boolean;
 }
 
@@ -24,28 +28,38 @@ interface Step {
 const scripts: fc.Arbitrary<Step[]> = fc
   .record({
     count: fc.integer({ min: 1, max: 6 }),
+    byUser: fc.array(fc.boolean(), { minLength: 6, maxLength: 6 }),
     loaded: fc.array(fc.boolean(), { minLength: 6, maxLength: 6 }),
     picks: fc.array(fc.nat(), { minLength: 12, maxLength: 12 }),
   })
-  .map(({ count, loaded, picks }) => {
+  .map(({ count, byUser, loaded, picks }) => {
     const steps: Step[] = [];
     const loading: number[] = [];
     let begun = 0;
+    const end = (attempt: number): Step => ({
+      begin: false,
+      attempt,
+      byUser: false,
+      loaded: loaded[attempt - 1]!,
+    });
     for (const pick of picks) {
       if (begun < count && (loading.length === 0 || pick % 2 === 0)) {
         loading.push(++begun);
-        steps.push({ begin: true, attempt: begun, loaded: false });
+        steps.push({ begin: true, attempt: begun, byUser: byUser[begun - 1]!, loaded: false });
       } else if (loading.length > 0) {
-        const [attempt] = loading.splice(pick % loading.length, 1);
-        steps.push({ begin: false, attempt: attempt!, loaded: loaded[attempt! - 1]! });
+        steps.push(end(loading.splice(pick % loading.length, 1)[0]!));
       }
     }
     // The attempts that still load end in their order.
-    for (const attempt of loading) {
-      steps.push({ begin: false, attempt, loaded: loaded[attempt - 1]! });
-    }
+    for (const attempt of loading) steps.push(end(attempt));
     return steps;
   });
+
+/** Runs one step of a script. */
+function run(o: Opens, step: Step): void {
+  if (step.begin) beginOpen(o, step.byUser);
+  else endOpen(o, step.attempt, step.loaded);
+}
 
 describe('open attempts', () => {
   it('shows the book of the last attempt that loaded, whatever the order of the loads', () => {
@@ -56,7 +70,7 @@ describe('open attempts', () => {
         for (const step of steps) {
           const before = o.shown;
           if (step.begin) {
-            expect(beginOpen(o)).toBe(step.attempt);
+            expect(beginOpen(o, step.byUser)).toBe(step.attempt);
           } else {
             const shows = endOpen(o, step.attempt, step.loaded);
             // An attempt shows when it loaded and no later attempt shows.
@@ -78,7 +92,7 @@ describe('open attempts', () => {
 /** Opens where book P shows, and the attempt of P. */
 function withP(): { o: Opens; p: number } {
   const o = createOpens();
-  const p = beginOpen(o);
+  const p = beginOpen(o, true);
   endOpen(o, p, true);
   return { o, p };
 }
@@ -90,7 +104,7 @@ describe('subtitlesOwner', () => {
     // over the subtitles of P, and the open of A then cleared it.
     const { o } = withP();
     expect(subtitlesOwner(o, 'P')).toBe('P');
-    const a = beginOpen(o);
+    const a = beginOpen(o, true);
     expect(subtitlesOwner(o, 'P')).toBeNull();
     expect(endOpen(o, a, true)).toBe(true);
     expect(subtitlesOwner(o, 'A')).toBe('A');
@@ -98,7 +112,7 @@ describe('subtitlesOwner', () => {
 
   it('gives them to the book that stays open when the open fails', () => {
     const { o } = withP();
-    const a = beginOpen(o);
+    const a = beginOpen(o, true);
     expect(subtitlesOwner(o, 'P')).toBeNull();
     expect(endOpen(o, a, false)).toBe(false);
     expect(subtitlesOwner(o, 'P')).toBe('P');
@@ -107,8 +121,8 @@ describe('subtitlesOwner', () => {
   it('does not wait for an older open that cannot show', () => {
     // The user picks a large A, then a small B. B shows while A loads.
     const o = createOpens();
-    const a = beginOpen(o);
-    const b = beginOpen(o);
+    const a = beginOpen(o, true);
+    const b = beginOpen(o, true);
     expect(endOpen(o, b, true)).toBe(true);
     expect(subtitlesOwner(o, 'B')).toBe('B');
     expect(endOpen(o, a, true)).toBe(false);
@@ -117,7 +131,7 @@ describe('subtitlesOwner', () => {
   it('gives no book while no book is open', () => {
     const o = createOpens();
     expect(subtitlesOwner(o, null)).toBeNull();
-    beginOpen(o);
+    beginOpen(o, true);
     expect(subtitlesOwner(o, null)).toBeNull();
   });
 
@@ -126,10 +140,61 @@ describe('subtitlesOwner', () => {
       fc.property(scripts, (steps) => {
         const o = createOpens();
         for (const step of steps) {
-          if (step.begin) beginOpen(o);
-          else endOpen(o, step.attempt, step.loaded);
+          run(o, step);
           expect(subtitlesOwner(o, 'book')).toBe(opening(o) ? null : 'book');
         }
+      }),
+    );
+  });
+});
+
+describe('userOpened', () => {
+  it('keeps the copy of a book that the user opened while the last book loaded', () => {
+    // The finding: the restore opens a large last book L. The user picks a
+    // small B, B shows first, and the copy of B replaces L. The open of L
+    // then gives false, and the restore deleted the copy of B.
+    const o = createOpens();
+    const since = o.byUser;
+    const l = beginOpen(o, false);
+    const b = beginOpen(o, true);
+    expect(endOpen(o, b, true)).toBe(true);
+    expect(endOpen(o, l, true)).toBe(false);
+    expect(userOpened(o, since)).toBe(true);
+  });
+
+  it('does not open the last book over a book that the user picked while the database opened', () => {
+    // The finding: the database upgrade holds the restore, and the start
+    // card shows. The user picks B. When the database opens, B still loads
+    // and no book shows, so the restore opened the last book as a later
+    // attempt, and it won over B.
+    const o = createOpens();
+    const since = o.byUser;
+    beginOpen(o, true);
+    expect(o.shown).toBe(0);
+    expect(userOpened(o, since)).toBe(true);
+  });
+
+  it('lets the restore open and forget the last book when the user opened nothing', () => {
+    const o = createOpens();
+    const since = o.byUser;
+    const l = beginOpen(o, false);
+    expect(userOpened(o, since)).toBe(false);
+    expect(endOpen(o, l, false)).toBe(false);
+    expect(userOpened(o, since)).toBe(false);
+  });
+
+  it('is true exactly when the user started an open after the restore started', () => {
+    const input = scripts.chain((steps) =>
+      fc.tuple(fc.constant(steps), fc.nat({ max: steps.length })),
+    );
+    fc.assert(
+      fc.property(input, ([steps, start]) => {
+        const o = createOpens();
+        steps.slice(0, start).forEach((step) => run(o, step));
+        const since = o.byUser;
+        steps.slice(start).forEach((step) => run(o, step));
+        const later = steps.slice(start).some((step) => step.begin && step.byUser);
+        expect(userOpened(o, since)).toBe(later);
       }),
     );
   });
