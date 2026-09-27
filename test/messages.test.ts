@@ -24,6 +24,7 @@ import {
   readingText,
   keptResultText,
   shownInPlayerPart,
+  stripTexts,
   subreadErrorText,
   subreadQuestion,
   subreadResultText,
@@ -31,6 +32,32 @@ import {
   waitPagesText,
   withForceOcr,
 } from '../src/messages';
+
+describe('stripTexts', () => {
+  it('gives the full text of each part that shows, for the panel of the strip', () => {
+    // The phone finding: the strip showed "No subtitle li..." next to
+    // "Allow notification acces..." and the "Open SubRead Overlay" button.
+    const player = 'Allow notification access in SubRead Overlay.';
+    const event = 'No subtitle lines in book.srt.pdf. Choose an .srt or .vtt file.';
+    expect(
+      stripTexts([
+        { shown: true, title: player, text: `${player} Open SubRead Overlay` },
+        { shown: false, title: '', text: 'Follow paused' },
+        { shown: false, title: '', text: '' },
+        { shown: true, title: event, text: event },
+      ]),
+    ).toEqual([player, event]);
+  });
+
+  it('takes the text of a part without a title, and skips a part without text', () => {
+    expect(
+      stripTexts([
+        { shown: true, title: '', text: 'Follow paused' },
+        { shown: true, title: '', text: ' ' },
+      ]),
+    ).toEqual(['Follow paused']);
+  });
+});
 
 describe('waitMessage', () => {
   const retry = { id: 'retry-reading', text: 'Retry' };

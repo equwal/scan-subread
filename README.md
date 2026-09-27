@@ -117,7 +117,15 @@ The strip under the top bar shows three things:
   takes more than 2 minutes, the strip says so, with Retry. "Force OCR
   is on" shows while it is on for the book.
 - The last event, for example a lookup or an error. It fades after 6
-  seconds. Screen readers read this part.
+  seconds. While it shows, it takes the place of the player text, but
+  the button or the link of the player stays. Screen readers read this
+  part.
+
+The strip is one line, so the page under it does not move, and a long
+text ends with "…". Tap the strip to read the full texts: they show in a
+panel over the top of the page. The next tap closes the panel, and else
+it closes after 6 seconds. A tap on a button of the strip, for example
+Retry, only does what the button does.
 
 ### The three follow modes
 

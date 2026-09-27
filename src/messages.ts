@@ -12,6 +12,29 @@ export interface Message {
   action?: { id: ActionId; text: string };
 }
 
+/** A part of the status strip, for the panel of its full texts. */
+export interface StripPart {
+  /** False while the part is hidden. */
+  shown: boolean;
+  /** The full text of its message: its title attribute, or '' when it has none. */
+  title: string;
+  /** Its text as it shows, with the text of its link or its button. */
+  text: string;
+}
+
+/**
+ * The full texts of the parts of the strip that show, for the panel that a
+ * tap on the strip opens: the title of each part, else its text. A part
+ * with no text gives nothing. On the phone the one-line strip cut a long
+ * message, and a phone cannot hover to read the title.
+ */
+export function stripTexts(parts: readonly StripPart[]): string[] {
+  return parts
+    .filter((part) => part.shown)
+    .map((part) => part.title || part.text.trim())
+    .filter((text) => text !== '');
+}
+
 export const OVERLAY_RELEASES = 'https://github.com/equwal/subread-overlay/releases/latest';
 export const SUBREAD_RELEASES = 'https://github.com/equwal/subread-android/releases/latest';
 export const DICTIONARY_RELEASES = 'https://github.com/equwal/subread-dictionary/releases/latest';
