@@ -28,7 +28,7 @@ export interface Ocr {
 /**
  * Start an OCR worker for `lang` ("eng", "jpn", "jpn_vert", "jpn+eng", ...).
  * `onProgress` gets values in [0, 1] while a page is recognized. Rejects with
- * OcrStartError when the worker cannot start.
+ * OcrStartError when the worker cannot start, and then the worker stops.
  */
 export async function createOcr(lang: string, onProgress: (p: number) => void): Promise<Ocr> {
   let worker: TesseractWorker;
@@ -103,20 +103,69 @@ function ppmOf(canvas: HTMLCanvasElement): ImageLike {
 /**
  * Starts the worker of tesseract.js. When the language data does not load,
  * tesseract.js gives the error to errorHandler, and the promise of
- * createWorker does not settle. So the first error rejects the start. That
- * worker cannot be stopped: tesseract.js gives no handle to it.
+ * createWorker does not settle (src/createWorker.js rejects it only when
+ * the core does not load). So the first error rejects the start.
+ *
+ * tesseract.js does not stop the Web Worker of a start that failed, and it
+ * gives the app the worker only after the start. So the start keeps the Web
+ * Worker (see spawnedBy) and stops it when the start fails. Without this,
+ * each Retry, book or setting change left one more worker, each with the
+ * WebAssembly core in its memory.
  */
 function startWorker(lang: string, onProgress: (p: number) => void): Promise<TesseractWorker> {
   return new Promise((resolve, reject) => {
-    createWorker(lang, 1, {
-      workerPath,
-      corePath,
-      logger: (m) => {
-        if (m.status === 'recognizing text') onProgress(m.progress);
-      },
-      // Also after the start: without an errorHandler, tesseract.js throws
-      // each error of a job in the message handler of the worker.
-      errorHandler: reject,
-    }).then(resolve, reject);
+    let settled = false;
+    let spawned: Worker | undefined;
+    const fail = (err: unknown): void => {
+      // After the start, an error belongs to a page: OcrJob stops the worker.
+      if (settled) return;
+      settled = true;
+      spawned?.terminate();
+      reject(err);
+    };
+    const made = spawnedBy(() =>
+      createWorker(lang, 1, {
+        workerPath,
+        corePath,
+        logger: (m) => {
+          if (m.status === 'recognizing text') onProgress(m.progress);
+        },
+        // Also after the start: without an errorHandler, tesseract.js throws
+        // each error of a job in the message handler of the worker.
+        errorHandler: fail,
+      }),
+    );
+    spawned = made.worker;
+    made.result.then((worker) => {
+      settled = true;
+      resolve(worker);
+    }, fail);
   });
+}
+
+/**
+ * Runs `create`, and gives its result and the Web Worker that it made, if
+ * any. createWorker of tesseract.js makes its Web Worker in the synchronous
+ * part of the call (src/createWorker.js calls spawnWorker before it
+ * returns). So during the call, a Worker class that keeps each new worker
+ * stands in for the Worker class of the browser. The class of the browser
+ * comes back before any other code runs.
+ */
+function spawnedBy<T>(create: () => T): { result: T; worker: Worker | undefined } {
+  const Native = globalThis.Worker;
+  // Node has no Worker: tesseract.js uses worker_threads there.
+  if (typeof Native !== 'function') return { result: create(), worker: undefined };
+  let worker: Worker | undefined;
+  globalThis.Worker = class extends Native {
+    constructor(url: string | URL, options?: WorkerOptions) {
+      super(url, options);
+      worker = this;
+    }
+  };
+  try {
+    const result = create();
+    return { result, worker };
+  } finally {
+    globalThis.Worker = Native;
+  }
 }

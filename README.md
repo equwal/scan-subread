@@ -177,6 +177,10 @@ million pixels. When it takes longer, or when the OCR worker fails, the
 app stops the worker and counts the page as not read. The next page
 starts a new worker, so one bad page does not stop the reading.
 
+When the OCR worker cannot start, for example because the language data
+does not load, the app stops that worker too. tesseract.js does not stop
+it, so without this each Retry left one more worker in memory.
+
 Both give the same tokens: one box per character with a line id and a
 word id. The alignment, the mark, the page turn and the lookup work the
 same way on a scan and on a text PDF.

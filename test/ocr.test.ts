@@ -38,9 +38,33 @@ function fakeCanvas(): HTMLCanvasElement {
 /** A path on the origin of the app, for example "/assets/worker.min-abc.js". */
 const LOCAL = /^\/(?!\/)/;
 
+/** The Web Worker of the browser, for the tests. It keeps each worker that it makes. */
+class FakeWebWorker extends EventTarget {
+  static made: FakeWebWorker[] = [];
+  terminate = vi.fn();
+  constructor(readonly url: string | URL) {
+    super();
+    FakeWebWorker.made.push(this);
+  }
+}
+
+/**
+ * createWorker as tesseract.js makes it in the browser: it makes its Web
+ * Worker at once (src/worker/browser/spawnWorker.js). `start` gives the
+ * promise of the start.
+ */
+function spawningCreateWorker(start: (opts: Options) => Promise<unknown>) {
+  return (_lang: string, _oem: number, opts: Options): Promise<unknown> => {
+    new Worker('blob:tesseract-worker');
+    return start(opts);
+  };
+}
+
 describe('createOcr', () => {
   afterEach(() => {
     createWorker.mockReset();
+    vi.unstubAllGlobals();
+    FakeWebWorker.made = [];
   });
 
   it('loads the worker script and the core from the app, not from jsDelivr', async () => {
@@ -90,6 +114,50 @@ describe('createOcr', () => {
     const error = await createOcr('jpn', () => undefined).catch((e: unknown) => e);
     expect(error).toBeInstanceOf(OcrStartError);
     expect((error as OcrStartError).cause).toBe('TypeError: Failed to fetch');
+  });
+
+  it('stops the Web Worker when the language data does not load', async () => {
+    // The finding: tesseract.js gives no handle to this worker, and it does
+    // not stop it. Each Retry, book or setting left one more worker.
+    vi.stubGlobal('Worker', FakeWebWorker);
+    createWorker.mockImplementation(
+      spawningCreateWorker((opts) => {
+        setTimeout(() => opts.errorHandler?.('TypeError: Failed to fetch'), 0);
+        return new Promise(() => undefined);
+      }),
+    );
+    const error = await createOcr('jpn', () => undefined).catch((e: unknown) => e);
+    expect(error).toBeInstanceOf(OcrStartError);
+    expect(FakeWebWorker.made).toHaveLength(1);
+    expect(FakeWebWorker.made[0]!.terminate).toHaveBeenCalledTimes(1);
+    // The browser gets its own Worker constructor back.
+    expect(globalThis.Worker).toBe(FakeWebWorker);
+  });
+
+  it('stops the Web Worker when the start fails', async () => {
+    // tesseract.js rejects the start when its worker script does not load,
+    // and it does not stop the Web Worker.
+    vi.stubGlobal('Worker', FakeWebWorker);
+    createWorker.mockImplementation(
+      spawningCreateWorker(() => Promise.reject('Uncaught NetworkError: failed to load.')),
+    );
+    await expect(createOcr('eng', () => undefined)).rejects.toBeInstanceOf(OcrStartError);
+    expect(FakeWebWorker.made[0]!.terminate).toHaveBeenCalledTimes(1);
+  });
+
+  it('does not stop the Web Worker for an error after the start', async () => {
+    // After the start, an error belongs to a page. OcrJob stops the worker then.
+    vi.stubGlobal('Worker', FakeWebWorker);
+    let handler: ((error: unknown) => void) | undefined;
+    createWorker.mockImplementation(
+      spawningCreateWorker((opts) => {
+        handler = opts.errorHandler;
+        return Promise.resolve(fakeWorker());
+      }),
+    );
+    await createOcr('eng', () => undefined);
+    handler?.('The image is empty.');
+    expect(FakeWebWorker.made[0]!.terminate).not.toHaveBeenCalled();
   });
 
   it('gives OcrStartError and stops the worker when the page mode cannot be set', async () => {
