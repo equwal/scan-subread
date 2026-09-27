@@ -85,6 +85,12 @@ export function notReadText(read: number, total: number): string {
   return `This page is not read yet (${read}/${total} read).`;
 }
 
+/** The strip says this while the database upgrade holds the reading. */
+export const UPDATING_CACHE_TEXT = 'Updating the page cache...';
+
+/** The copy of the last book cannot be read, for example after the storage was cleared. */
+export const LAST_BOOK_GONE_TEXT = 'The last book is no longer in the app storage. Open it again.';
+
 /** A picked file of 0 bytes, for example a file that another app still writes. */
 export const EMPTY_FILE_TEXT = 'The file is empty or not ready. Try again in a moment.';
 

@@ -137,16 +137,31 @@ describe('token cache', () => {
     expect(await cache.getMeta('neko.pdf|10')).toEqual({ page: 1, forceOcr: true });
   });
 
-  it('keeps the subtitles of putSrt in the meta data', async () => {
+  it('forgets the last book, and keeps the meta data and the pages', async () => {
     const cache = await freshCache();
-    await cache.putMeta('neko.pdf|10', { page: 2 });
-    await cache.putSrt('neko.pdf|10', srt);
-    expect(await cache.getSrt('neko.pdf|10')).toBe(srt);
-    expect(await cache.getMeta('neko.pdf|10')).toEqual({
-      page: 2,
-      subtitles: { name: 'neko.srt', text: srt, source: 'subread' },
+    const neko = new File(['%PDF-1.7 猫'], 'neko.pdf', { type: 'application/pdf' });
+    await cache.putLastBook(neko);
+    await cache.putMeta(cache.bookKey(neko), { page: 2 });
+    await cache.putPage(cache.pageKey(neko, 0, 'jpn', 'ocr'), entry);
+    await cache.clearLastBook();
+    expect(await cache.getLastBook()).toBeUndefined();
+    expect(await cache.getMeta(cache.bookKey(neko))).toEqual({ page: 2 });
+    expect(await cache.getPage(cache.pageKey(neko, 0, 'jpn', 'ocr'))).toEqual(entry);
+    // No last book: nothing to forget.
+    await expect(cache.clearLastBook()).resolves.toBeUndefined();
+  });
+
+  it('tells when the database is open, after the upgrade', async () => {
+    const old = await openDB('scan-subread', 1, {
+      upgrade(d) {
+        d.createObjectStore('dictionaries');
+        d.createObjectStore('terms');
+      },
     });
-    expect(await cache.getSrt('inu.pdf|20')).toBeUndefined();
+    old.close();
+    const cache = await freshCache();
+    await cache.dbReady();
+    expect(await schema()).toEqual({ version: 3, stores: ['books', 'meta', 'pages'] });
   });
 
   it('clears the pages of one book, or the pages of all books', async () => {
@@ -205,8 +220,8 @@ describe('token cache', () => {
     await expect(cache.putMeta('b', { page: 1 })).resolves.toBeUndefined();
     await expect(cache.putLastBook(new File(['x'], 'b.pdf'))).resolves.toBe(false);
     await expect(cache.getLastBook()).resolves.toBeUndefined();
-    await expect(cache.getSrt('b')).resolves.toBeUndefined();
-    await expect(cache.putSrt('b', srt)).resolves.toBeUndefined();
+    await expect(cache.clearLastBook()).resolves.toBeUndefined();
+    await expect(cache.dbReady()).resolves.toBeUndefined();
     expect(warn).toHaveBeenCalledTimes(1);
   });
 

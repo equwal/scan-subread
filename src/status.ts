@@ -49,9 +49,9 @@ export function showPlayer(m: Message | null): void {
 }
 
 /** Shows how far the reading of the pages is. Null hides this part. */
-export function showReading(text: string | null): void {
-  reading.hidden = text === null;
-  reading.textContent = text ?? '';
+export function showReading(m: Message | string | null): void {
+  reading.hidden = m === null;
+  fill(reading, typeof m === 'string' ? { text: m } : (m ?? { text: '' }));
 }
 
 /** Shows an event, for example a lookup or an error. It fades after EVENT_MS. */

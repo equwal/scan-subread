@@ -22,6 +22,7 @@ import {
   type StoreNames,
 } from 'idb';
 import type { OcrToken } from './align';
+import { srtName } from './book-subtitles';
 
 export type TextSource = 'text' | 'ocr';
 
@@ -124,8 +125,7 @@ async function moveSrtToMeta(
 /** Subtitles from SubRead for the book `key`. "book.pdf|123" gives the name "book.srt". */
 function subreadSubtitles(key: string, text: string): BookSubtitles {
   const bar = key.lastIndexOf('|');
-  const file = bar < 0 ? key : key.slice(0, bar);
-  return { name: `${file.replace(/\.pdf$/i, '')}.srt`, text, source: 'subread' };
+  return { name: srtName(bar < 0 ? key : key.slice(0, bar)), text, source: 'subread' };
 }
 
 /** Runs `op` on the database. Gives undefined when IndexedDB fails, and warns once. */
@@ -193,6 +193,20 @@ export function getLastBook(): Promise<File | undefined> {
   });
 }
 
+/** Removes the copy of the last book, for example when its data cannot be read. */
+export async function clearLastBook(): Promise<void> {
+  await tryDb((d) => d.delete('books', LAST));
+}
+
+/**
+ * Resolves when the database is open, or when IndexedDB failed. The first
+ * open after an upgrade can take long: an earlier build kept about 86 MB of
+ * dictionary data, and the upgrade deletes it.
+ */
+export async function dbReady(): Promise<void> {
+  await tryDb(() => Promise.resolve());
+}
+
 /** What the reader keeps for the book `key`. An empty object when there is nothing, or IndexedDB fails. */
 export async function getMeta(key: string): Promise<BookMeta> {
   return (await tryDb((d) => d.get('meta', key))) ?? {};
@@ -216,20 +230,4 @@ export async function putMeta(key: string, patch: Partial<BookMeta>): Promise<vo
     };
     return Promise.all([merge(), tx.done]);
   });
-}
-
-/**
- * The text of the subtitles of the book `key`.
- * @deprecated Use getMeta. The next change of main.ts removes this function.
- */
-export async function getSrt(key: string): Promise<string | undefined> {
-  return (await getMeta(key)).subtitles?.text;
-}
-
-/**
- * Keeps the subtitles that SubRead made for the book `key`.
- * @deprecated Use putMeta. The next change of main.ts removes this function.
- */
-export async function putSrt(key: string, srt: string): Promise<void> {
-  await putMeta(key, { subtitles: subreadSubtitles(key, srt) });
 }
