@@ -13,6 +13,7 @@ export interface Message {
 }
 
 export const OVERLAY_RELEASES = 'https://github.com/equwal/subread-overlay/releases/latest';
+export const SUBREAD_RELEASES = 'https://github.com/equwal/subread-android/releases/latest';
 
 /** "1 page", "2 pages". */
 function count(n: number, noun: string): string {
@@ -111,6 +112,46 @@ export function withForceOcr(m: Message | null, forceOcr: boolean): Message | nu
     ? `${m.text} ${FORCE_OCR_NOTE}.`
     : `${m.text} · ${FORCE_OCR_NOTE}`;
   return { ...m, text };
+}
+
+export const SUBREAD_NOT_INSTALLED: Message = {
+  text: 'SubRead is not installed.',
+  link: { href: SUBREAD_RELEASES, text: 'Get SubRead' },
+};
+
+/** SubRead waits for the reading: it makes the subtitles from the text of all pages. */
+export function waitPagesText(read: number, total: number): string {
+  return `Reading pages ${read}/${total} first...`;
+}
+
+/** What SubRead made: the cues, the language and the share of the lines found in the book. */
+export function subreadResultText(r: {
+  cues?: number;
+  language?: string | null;
+  matchRate?: number;
+}): string {
+  const cues = r.cues !== undefined && r.cues >= 0 ? String(r.cues) : '?';
+  const rate = r.matchRate !== undefined && r.matchRate >= 0 ? r.matchRate : null;
+  return (
+    `${cues} cues, language ${r.language ?? '?'}` +
+    (rate === null ? '.' : `, ${Math.round(rate * 100)}% of the lines found in the book.`) +
+    (rate !== null && rate < 0.8
+      ? ' Under 80% usually means another edition or the wrong language.'
+      : '')
+  );
+}
+
+/** Why SubRead made no subtitles. `cannot_start` means that the read grant of the audio is gone. */
+export function subreadErrorText(error: string): string {
+  if (error.startsWith('cannot_start')) {
+    return 'SubRead cannot read the audio file. Choose the audio again.';
+  }
+  return `SubRead made no subtitles: ${error}.`;
+}
+
+/** The question before the subtitles of SubRead load, with the reasons of subreadConcerns. */
+export function subreadQuestion(concerns: readonly string[]): string {
+  return ['SubRead made subtitles for this book.', ...concerns, 'Load them?'].join('\n\n');
 }
 
 /** The question before the saved pages of one book go. */

@@ -124,8 +124,7 @@ async function moveSrtToMeta(
 
 /** Subtitles from SubRead for the book `key`. "book.pdf|123" gives the name "book.srt". */
 function subreadSubtitles(key: string, text: string): BookSubtitles {
-  const bar = key.lastIndexOf('|');
-  return { name: srtName(bar < 0 ? key : key.slice(0, bar)), text, source: 'subread' };
+  return { name: srtName(bookName(key)), text, source: 'subread' };
 }
 
 /** Runs `op` on the database. Gives undefined when IndexedDB fails, and warns once. */
@@ -146,6 +145,12 @@ type FileId = Pick<File, 'name' | 'size'>;
 /** The key of a book: the file name and size. */
 export function bookKey(file: FileId): string {
   return `${file.name}|${file.size}`;
+}
+
+/** The file name in a book key: "book.pdf|123" gives "book.pdf". */
+export function bookName(key: string): string {
+  const bar = key.lastIndexOf('|');
+  return bar < 0 ? key : key.slice(0, bar);
 }
 
 export function pageKey(file: FileId, page: number, lang: string, source: TextSource): string {

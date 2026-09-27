@@ -1,5 +1,6 @@
+import fc from 'fast-check';
 import { describe, expect, it } from 'vitest';
-import { srtName, subtitlesOnOpen } from '../src/book-subtitles';
+import { resultName, srtName, subreadConcerns, subtitlesOnOpen } from '../src/book-subtitles';
 
 describe('srtName', () => {
   it('puts .srt in place of .pdf', () => {
@@ -37,5 +38,89 @@ describe('subtitlesOnOpen', () => {
   it('keeps the subtitles of the same book', () => {
     expect(subtitlesOnOpen(jpn, jpn, true)).toBe('keep');
     expect(subtitlesOnOpen(jpn, jpn, false)).toBe('keep');
+  });
+});
+
+describe('resultName', () => {
+  it('is the FNV-1a hash of the book key', () => {
+    // The test vectors of FNV-1a (32 bit).
+    expect(resultName('')).toBe('subread-811c9dc5.srt');
+    expect(resultName('a')).toBe('subread-e40c292c.srt');
+    expect(resultName('foobar')).toBe('subread-bf9cf968.srt');
+  });
+
+  it('tells apart two Japanese books that the plugin would both call "_"', () => {
+    const neko = resultName('吾輩は猫である.pdf|204800');
+    const botchan = resultName('坊っちゃん.pdf|204800');
+    expect(neko).not.toBe(botchan);
+    expect(resultName('吾輩は猫である.pdf|204801')).not.toBe(neko);
+  });
+
+  it('gives a name that the plugin keeps as it is, the same for the same key', () => {
+    fc.assert(
+      fc.property(fc.string({ unit: 'binary' }), (key) => {
+        const name = resultName(key);
+        expect(name).toMatch(/^subread-[0-9a-f]{8}\.srt$/);
+        expect(resultName(key)).toBe(name);
+      }),
+    );
+  });
+});
+
+describe('subreadConcerns', () => {
+  const file = { name: 'sample-eng-2p.srt', source: 'file' as const };
+
+  it('asks for the phone case: no speech, language km, match rate 1, over a loaded file', () => {
+    expect(
+      subreadConcerns({
+        requested: 'auto',
+        ocrLang: 'eng',
+        language: 'km',
+        matchRate: 1,
+        loaded: file,
+      }),
+    ).toEqual([
+      'They replace sample-eng-2p.srt, the subtitles that you loaded.',
+      'SubRead found the language "km", not "en".',
+    ]);
+  });
+
+  it('loads at once a good result over no subtitles or over an earlier SubRead result', () => {
+    const good = { requested: 'auto', ocrLang: 'jpn', language: 'ja', matchRate: 0.97 };
+    expect(subreadConcerns(good)).toEqual([]);
+    const earlier = { name: 'neko.srt', source: 'subread' as const };
+    expect(subreadConcerns({ ...good, loaded: earlier })).toEqual([]);
+  });
+
+  it('compares the found language with the requested one', () => {
+    expect(subreadConcerns({ requested: 'ja', ocrLang: 'eng', language: 'ja' })).toEqual([]);
+    expect(subreadConcerns({ requested: 'ja', ocrLang: 'jpn', language: 'en' })).toEqual([
+      'SubRead found the language "en", not "ja".',
+    ]);
+  });
+
+  it('takes the language of the book from the OCR language when the request is auto', () => {
+    const both = { requested: 'auto', ocrLang: 'jpn+eng' };
+    expect(subreadConcerns({ ...both, language: 'en' })).toEqual([]);
+    expect(subreadConcerns({ ...both, language: 'ja' })).toEqual([]);
+    expect(subreadConcerns({ ...both, language: 'km' })).toEqual([
+      'SubRead found the language "km", not "ja" or "en".',
+    ]);
+    const vertical = { requested: 'auto', ocrLang: 'jpn_vert', language: 'ja' };
+    expect(subreadConcerns(vertical)).toEqual([]);
+    expect(subreadConcerns({ requested: 'auto', ocrLang: 'eng', language: 'en-US' })).toEqual([]);
+  });
+
+  it('does not ask about a language or a match rate that SubRead does not tell', () => {
+    expect(subreadConcerns({ requested: 'ja', ocrLang: 'jpn', language: null })).toEqual([]);
+    expect(subreadConcerns({ requested: 'ja', ocrLang: 'jpn', language: '' })).toEqual([]);
+    expect(subreadConcerns({ requested: 'ja', ocrLang: 'jpn', matchRate: -1 })).toEqual([]);
+  });
+
+  it('asks when less than 80% of the lines are found in the book', () => {
+    expect(subreadConcerns({ requested: 'en', ocrLang: 'eng', matchRate: 0.42 })).toEqual([
+      'SubRead found only 42% of the lines in the book.',
+    ]);
+    expect(subreadConcerns({ requested: 'en', ocrLang: 'eng', matchRate: 0.8 })).toEqual([]);
   });
 });

@@ -18,6 +18,10 @@ import {
   playerProblem,
   readingEndMessage,
   readingText,
+  subreadErrorText,
+  subreadQuestion,
+  subreadResultText,
+  waitPagesText,
   withForceOcr,
 } from '../src/messages';
 
@@ -166,6 +170,39 @@ describe('the end of the reading', () => {
       action: retry,
     });
     expect(withForceOcr({ text: 'Reading 1/2' }, false)).toEqual({ text: 'Reading 1/2' });
+  });
+});
+
+describe('SubRead texts', () => {
+  it('tells how far the reading is while SubRead waits', () => {
+    expect(waitPagesText(3, 40)).toBe('Reading pages 3/40 first...');
+  });
+
+  it('tells what SubRead made', () => {
+    expect(subreadResultText({ cues: 15, language: 'en', matchRate: 0.97 })).toBe(
+      '15 cues, language en, 97% of the lines found in the book.',
+    );
+    expect(subreadResultText({ cues: 15, language: 'en', matchRate: 0.5 })).toBe(
+      '15 cues, language en, 50% of the lines found in the book. Under 80% usually means another edition or the wrong language.',
+    );
+    // The result file holds only the .srt, and the plugin gives -1 for no value.
+    expect(subreadResultText({})).toBe('? cues, language ?.');
+    expect(subreadResultText({ cues: -1, language: null, matchRate: -1 })).toBe(
+      '? cues, language ?.',
+    );
+  });
+
+  it('asks the user to choose the audio again when SubRead cannot start', () => {
+    expect(subreadErrorText('cannot_start: Permission Denial: opening provider')).toBe(
+      'SubRead cannot read the audio file. Choose the audio again.',
+    );
+    expect(subreadErrorText('cancelled')).toBe('SubRead made no subtitles: cancelled.');
+  });
+
+  it('asks with the reasons before the subtitles of SubRead load', () => {
+    expect(subreadQuestion(['A.', 'B.'])).toBe(
+      'SubRead made subtitles for this book.\n\nA.\n\nB.\n\nLoad them?',
+    );
   });
 });
 

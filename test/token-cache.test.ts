@@ -206,6 +206,15 @@ describe('token cache', () => {
     );
   }, 30_000);
 
+  it('gives back the file name of a book key, also a name with "|"', async () => {
+    const cache = await freshCache();
+    fc.assert(
+      fc.property(fc.string({ unit: 'binary' }), fc.nat(), (name, size) => {
+        expect(cache.bookName(cache.bookKey({ name, size }))).toBe(name);
+      }),
+    );
+  });
+
   it('works without IndexedDB, and warns once', async () => {
     const warn = vi.spyOn(console, 'warn').mockImplementation(() => undefined);
     vi.spyOn(indexedDB, 'open').mockImplementation(() => {

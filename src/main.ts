@@ -6,7 +6,7 @@
 // (the strip) and view.ts (the page).
 
 import { createAligner, type Aligner, type OcrToken, type TokenSpan } from './align';
-import { srtName, subtitlesOnOpen } from './book-subtitles';
+import { resultName, srtName, subreadConcerns, subtitlesOnOpen } from './book-subtitles';
 import { bookText } from './book-text';
 import { LocalAudioClock, OverlayClock, type ClockSource, type ClockState } from './clock-source';
 import { audioPage, cueParts, cueProgress, pageStartTime, type CueParts } from './cue-pages';
@@ -30,7 +30,12 @@ import {
   playerMessage,
   readingEndMessage,
   readingText,
+  SUBREAD_NOT_INSTALLED,
+  subreadErrorText,
+  subreadQuestion,
+  subreadResultText,
   UPDATING_CACHE_TEXT,
+  waitPagesText,
   withForceOcr,
   type Message,
 } from './messages';
@@ -41,11 +46,12 @@ import { defaultRtl } from './paging';
 import type { PdfDoc } from './pdf';
 import { nextPage } from './read-order';
 import { scrollTarget } from './scroll';
-import { onAction, say, showPlayer, showReading } from './status';
-import { isAndroid, SubRead } from './subread';
+import { fill, onAction, say, showPlayer, showReading } from './status';
+import { isAndroid, SubRead, type SubtitlesResult } from './subread';
 import { decodeSubtitles, lastCueAt, parseSubtitles, type Cue } from './subtitles';
 import {
   bookKey,
+  bookName,
   clearLastBook,
   clearPages,
   dbReady,
@@ -73,8 +79,6 @@ const PAGE_SAVE_MS = 1000;
 
 /** After this many milliseconds, the strip tells that the database upgrade holds the reading. */
 const SLOW_DB_MS = 2000;
-
-const SUBREAD_RELEASES = 'https://github.com/equwal/subread-android/releases/latest';
 
 function el<T extends HTMLElement>(id: string): T {
   const e = document.getElementById(id);
@@ -158,6 +162,10 @@ const state = {
   dbSlow: false,
   /** "Force OCR" of the open book: the reading skips the text layer. */
   forceOcr: false,
+  /** A SubRead job that waits until all pages of its book are read. */
+  makeWait: null as { audio: { uri: string; name: string }; book: string } | null,
+  /** The book of the SubRead job that runs, or null. */
+  making: null as string | null,
   /** True while the player waits for a dictionary lookup that this app paused. */
   lookupPaused: false,
   /** True while a page turn by the user holds the follow. */
@@ -333,10 +341,16 @@ async function openBook(file: File, meta?: BookMeta): Promise<boolean> {
     clearSubtitles();
   }
   const subtitlesSeq = state.subtitlesSeq;
+  // A SubRead job that waits for the pages of another book does not start.
+  if (state.makeWait && state.makeWait.book !== key) {
+    state.makeWait = null;
+    ui.makeStatus.textContent = '';
+  }
   setForceOcr(meta?.forceOcr ?? false);
   ui.forceOcr.disabled = false;
   ui.clearBook.disabled = false;
-  ui.makeSubs.disabled = false;
+  // One SubRead job at a time.
+  ui.makeSubs.disabled = state.making !== null;
   ui.empty.hidden = true;
   ui.page.hidden = false;
   if (state.clock) showPlayerStatus(state.clock);
@@ -382,22 +396,26 @@ function applyMeta(meta: BookMeta, attempt: number, subtitlesSeq: number): void 
     setForceOcr(forceOcr);
     void readBook();
   }
-  if (state.subtitlesSeq !== subtitlesSeq) return;
-  const loaded = state.subtitles ? state.subtitlesBook : undefined;
-  switch (subtitlesOnOpen(loaded, key, meta.subtitles !== undefined)) {
-    case 'keep':
-      if (state.subtitles) {
-        state.subtitlesBook = key;
-        void putMeta(key, { subtitles: state.subtitles });
-      }
-      break;
-    case 'load':
-      if (meta.subtitles) loadSubtitles(meta.subtitles, { save: false });
-      break;
-    case 'clear':
-      clearSubtitles();
-      break;
+  if (state.subtitlesSeq === subtitlesSeq) {
+    const loaded = state.subtitles ? state.subtitlesBook : undefined;
+    switch (subtitlesOnOpen(loaded, key, meta.subtitles !== undefined)) {
+      case 'keep':
+        if (state.subtitles) {
+          state.subtitlesBook = key;
+          void putMeta(key, { subtitles: state.subtitles });
+        }
+        break;
+      case 'load':
+        if (meta.subtitles) loadSubtitles(meta.subtitles, { save: false });
+        break;
+      case 'clear':
+        clearSubtitles();
+        break;
+    }
   }
+  // After the saved subtitles: a SubRead result for a book with a file of
+  // the user asks first.
+  void checkPendingSubtitles();
 }
 
 // --- The page of the book, in its meta data ---
@@ -601,6 +619,7 @@ async function readBook(retry = false): Promise<void> {
       setReading(readingText(read(), total, `page ${page + 1}: ${how}`));
       if (page === state.currentPage) view.mark();
       scheduleAlign();
+      startMakeWhenRead();
     }
     const matched = align();
     say(
@@ -758,52 +777,144 @@ function showSrtRow(): void {
   };
 }
 
+// SubRead makes the subtitles from the audio and the text of the book. It
+// starts when all pages are read: with part of the text, the subtitles
+// cover only part of the book.
 ui.makeSubs.addEventListener('click', async () => {
-  const file = state.file;
-  if (!file) return;
-  let audio;
+  const book = state.book;
+  if (book === null) return;
+  let audio: { uri: string; name: string };
   try {
     audio = await SubRead.pickAudio();
   } catch {
     return;
   }
-  const read = state.pages.filter((p) => p).length;
-  ui.makeStatus.textContent = allPagesRead()
-    ? `SubRead makes the subtitles for ${audio.name}...`
-    : `Only ${read} of ${state.pdf?.numPages ?? 0} pages are read. The subtitles cover those pages. SubRead runs...`;
-  const result = await SubRead.makeSubtitles({
-    audio: audio.uri,
-    bookText: bookText(state.tokens),
-    language: ui.subLang.value,
-  });
-  // The subtitles are for the book of the job, not for a book that opened since.
-  if (state.file !== file) return;
-  if (result.error === 'not_installed') {
-    ui.makeStatus.replaceChildren('SubRead is not installed. ');
-    const a = document.createElement('a');
-    a.href = SUBREAD_RELEASES;
-    a.target = '_blank';
-    a.rel = 'noopener';
-    a.textContent = 'Get SubRead';
-    ui.makeStatus.append(a);
-    return;
-  }
-  if (result.error !== undefined || result.srt === undefined) {
-    ui.makeStatus.textContent = `SubRead made no subtitles: ${result.error ?? 'no file'}.`;
-    return;
-  }
-  const rate = result.matchRate !== undefined && result.matchRate >= 0 ? result.matchRate : null;
-  ui.makeStatus.textContent =
-    `${result.cues ?? '?'} cues, language ${result.language ?? '?'}` +
-    (rate === null ? '.' : `, ${Math.round(rate * 100)}% of the lines found in the book.`) +
-    (rate !== null && rate < 0.8
-      ? ' Under 80% usually means another edition or the wrong language.'
-      : '');
-  loadSubtitles(
-    { name: srtName(file.name), text: result.srt, source: 'subread' },
-    { from: 'SubRead' },
-  );
+  if (state.book !== book) return;
+  state.makeWait = { audio, book };
+  startMakeWhenRead();
 });
+
+/**
+ * Starts the SubRead job that waits, when all pages of its book are read.
+ * Else tells how far the reading is. readBook calls this after each page.
+ */
+function startMakeWhenRead(): void {
+  const wait = state.makeWait;
+  const pdf = state.pdf;
+  if (!wait || !pdf || wait.book !== state.book) return;
+  if (!allPagesRead()) {
+    ui.makeStatus.textContent = waitPagesText(state.pages.filter((p) => p).length, pdf.numPages);
+    return;
+  }
+  state.makeWait = null;
+  void makeSubtitles(wait.audio, wait.book);
+}
+
+/** Asks SubRead for the subtitles of the book `book`, and loads them after the checks. */
+async function makeSubtitles(audio: { uri: string; name: string }, book: string): Promise<void> {
+  const name = resultName(book);
+  state.making = book;
+  ui.makeSubs.disabled = true;
+  ui.makeStatus.textContent = `SubRead makes the subtitles for ${audio.name}...`;
+  let result: SubtitlesResult;
+  try {
+    result = await SubRead.makeSubtitles({
+      audio: audio.uri,
+      bookText: bookText(state.tokens),
+      language: ui.subLang.value,
+      resultName: name,
+    });
+  } catch (err) {
+    result = { error: String(err) };
+  } finally {
+    state.making = null;
+    ui.makeSubs.disabled = state.book === null;
+  }
+  // The result file waits for its book: pendingSubtitles loads it when the book opens.
+  if (state.book !== book) {
+    ui.makeStatus.textContent = 'SubRead finished, but another book is open now.';
+    return;
+  }
+  if (result.error === 'not_installed') {
+    fill(ui.makeStatus, SUBREAD_NOT_INSTALLED);
+    return;
+  }
+  // SubRead 0.10 and later also write the .srt into the result file. Read
+  // it now, so that the file goes, and use it when the answer has no .srt.
+  const copy = await SubRead.pendingSubtitles({ resultName: name }).catch(() => ({}) as PendingSrt);
+  const srt = result.srt ?? copy.srt;
+  if (srt === undefined) {
+    ui.makeStatus.textContent = subreadErrorText(result.error ?? 'no file');
+    return;
+  }
+  if (state.book !== book) {
+    void putMeta(book, { subtitles: subreadSubtitles(book, srt) });
+    return;
+  }
+  ui.makeStatus.textContent = subreadResultText(result);
+  offerSubreadSubtitles(srt, result);
+}
+
+type PendingSrt = { srt?: string };
+
+/** Subtitles that SubRead made for the book `book`. */
+function subreadSubtitles(book: string, srt: string): BookSubtitles {
+  return { name: srtName(bookName(book)), text: srt, source: 'subread' };
+}
+
+/**
+ * Loads subtitles that SubRead made for the open book. The user confirms
+ * first when they replace a file that the user loaded, or when the
+ * language or the match rate of SubRead look wrong (subreadConcerns).
+ */
+function offerSubreadSubtitles(
+  srt: string,
+  info: { language?: string | null; matchRate?: number },
+): boolean {
+  const book = state.book;
+  if (book === null) return false;
+  const concerns = subreadConcerns({
+    requested: ui.subLang.value,
+    ocrLang: ui.lang.value,
+    language: info.language,
+    matchRate: info.matchRate,
+    loaded: state.subtitles,
+  });
+  if (concerns.length > 0 && !confirm(subreadQuestion(concerns))) {
+    say('The subtitles of SubRead are not loaded.');
+    return false;
+  }
+  loadSubtitles(subreadSubtitles(book, srt), { from: 'SubRead' });
+  return true;
+}
+
+/**
+ * Loads the .srt that SubRead wrote into the result file of the open book.
+ * SubRead 0.10 and later write it also when Android stopped the reader
+ * during the job; then no answer comes. The reader checks when a book
+ * opens and when the app is active again.
+ */
+async function checkPendingSubtitles(): Promise<void> {
+  const book = state.book;
+  // During a job the answer of makeSubtitles brings the .srt.
+  if (!isAndroid || book === null || state.making !== null) return;
+  let pending: PendingSrt;
+  try {
+    pending = await SubRead.pendingSubtitles({ resultName: resultName(book) });
+  } catch {
+    return;
+  }
+  const srt = pending.srt;
+  if (srt === undefined) return;
+  // The call removed the file, so the .srt goes to the meta data of its book.
+  if (state.book !== book) {
+    void putMeta(book, { subtitles: subreadSubtitles(book, srt) });
+    return;
+  }
+  if (offerSubreadSubtitles(srt, {})) {
+    ui.makeStatus.textContent = 'SubRead finished while the reader was closed.';
+  }
+}
 
 // --- Alignment ---
 
