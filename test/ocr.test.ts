@@ -145,6 +145,30 @@ describe('createOcr', () => {
     expect(FakeWebWorker.made[0]!.terminate).toHaveBeenCalledTimes(1);
   });
 
+  it('stops the Web Worker when the start is cut off', async () => {
+    // OcrJob cuts off a start that takes too long, for example a download
+    // of the language data that stalls.
+    vi.stubGlobal('Worker', FakeWebWorker);
+    createWorker.mockImplementation(spawningCreateWorker(() => new Promise(() => undefined)));
+    const controller = new AbortController();
+    const start = createOcr('jpn', () => undefined, controller.signal);
+    const reason = new OcrStartError(new Error('The start took more than 120 s.'));
+    controller.abort(reason);
+    await expect(start).rejects.toBe(reason);
+    expect(FakeWebWorker.made[0]!.terminate).toHaveBeenCalledTimes(1);
+  }, 1000);
+
+  it('starts no worker when the start is cut off before it begins', async () => {
+    const controller = new AbortController();
+    controller.abort(new Error('OCR stopped.'));
+    const error = await createOcr('eng', () => undefined, controller.signal).catch(
+      (e: unknown) => e,
+    );
+    expect(error).toBeInstanceOf(OcrStartError);
+    expect((error as OcrStartError).cause).toEqual(new Error('OCR stopped.'));
+    expect(createWorker).not.toHaveBeenCalled();
+  });
+
   it('does not stop the Web Worker for an error after the start', async () => {
     // After the start, an error belongs to a page. OcrJob stops the worker then.
     vi.stubGlobal('Worker', FakeWebWorker);

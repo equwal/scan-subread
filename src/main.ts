@@ -524,8 +524,8 @@ function watchDb(): void {
 /**
  * The tokens of one page: from the cache, else the text layer, else OCR.
  * `force` skips the text layer. Rejects with OcrStartError when the page
- * needs OCR and OCR cannot start, and with OcrTimeoutError when the OCR of
- * the page takes too long.
+ * needs OCR and OCR cannot start or its start takes too long, and with
+ * OcrTimeoutError when the OCR of the page takes too long.
  */
 async function readPage(
   pdf: PdfDoc,
@@ -605,10 +605,11 @@ async function readBook(retry = false): Promise<void> {
   };
   // The OCR worker, and tesseract.js itself, load on the first page that
   // needs them. After a page that fails or takes too long, the job stops
-  // the worker, and the next page starts a new one.
-  const ocr = createOcrJob<HTMLCanvasElement>(() =>
+  // the worker, and the next page starts a new one. A start that takes too
+  // long gives each page the start error, and the strip shows Retry.
+  const ocr = createOcrJob<HTMLCanvasElement>((signal) =>
     import('./ocr').then(
-      ({ createOcr }) => createOcr(lang, onOcrProgress),
+      ({ createOcr }) => createOcr(lang, onOcrProgress, signal),
       (err: unknown) => {
         throw new OcrStartError(err);
       },

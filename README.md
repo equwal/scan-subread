@@ -101,8 +101,9 @@ The strip under the top bar shows three things:
   It goes away when all pages are read. A page that cannot be read does
   not stop the others: at the end the strip says "2 pages could not be
   read." with Retry, which reads only those pages. When OCR cannot
-  start, for example with no network on the first run, the strip says
-  so, with Retry. "Force OCR is on" shows while it is on for the book.
+  start, for example with no network on the first run, or its start
+  takes more than 2 minutes, the strip says so, with Retry. "Force OCR
+  is on" shows while it is on for the book.
 - The last event, for example a lookup or an error. It fades after 6
   seconds. Screen readers read this part.
 
@@ -179,7 +180,11 @@ starts a new worker, so one bad page does not stop the reading.
 
 When the OCR worker cannot start, for example because the language data
 does not load, the app stops that worker too. tesseract.js does not stop
-it, so without this each Retry left one more worker in memory.
+it, so without this each Retry left one more worker in memory. The start
+also has a time limit of 2 minutes: a download of the language data that
+stalls, for example behind the login page of a public Wi-Fi, does not
+end by itself. After the limit the strip says that OCR could not start,
+with Retry.
 
 Both give the same tokens: one box per character with a line id and a
 word id. The alignment, the mark, the page turn and the lookup work the
@@ -474,8 +479,9 @@ in a browser bundle.
 - `src/token-cache.ts`: IndexedDB store for the page tokens, the copy of
   the last book and the meta data of each book (thin).
 - `src/ocr.ts`, `src/pdf.ts`: thin browser wrappers around the libraries.
-  `src/ocr-job.ts`: the start error, the time limit of a page, the new
-  worker after a failed page and the stop of OCR, without tesseract.js.
+  `src/ocr-job.ts`: the start error, the time limits of the start and of
+  a page, the new worker after a failed page and the stop of OCR, without
+  tesseract.js.
 - `src/view.ts`: the page view: render to fit the width, draw the mark,
   scroll to it, render again on a resize.
 - `src/nav.ts`: page turns by the user: the arrows, the keys, the swipe

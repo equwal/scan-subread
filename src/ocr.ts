@@ -28,14 +28,20 @@ export interface Ocr {
 /**
  * Start an OCR worker for `lang` ("eng", "jpn", "jpn_vert", "jpn+eng", ...).
  * `onProgress` gets values in [0, 1] while a page is recognized. Rejects with
- * OcrStartError when the worker cannot start, and then the worker stops.
+ * OcrStartError when the worker cannot start, and then the worker stops. An
+ * abort of `signal` before the worker started stops the start in the same
+ * way: see createOcrJob.
  */
-export async function createOcr(lang: string, onProgress: (p: number) => void): Promise<Ocr> {
+export async function createOcr(
+  lang: string,
+  onProgress: (p: number) => void,
+  signal?: AbortSignal,
+): Promise<Ocr> {
   let worker: TesseractWorker;
   try {
-    worker = await startWorker(lang, onProgress);
+    worker = await startWorker(lang, onProgress, signal);
   } catch (err) {
-    throw new OcrStartError(err);
+    throw err instanceof OcrStartError ? err : new OcrStartError(err);
   }
   if (lang.includes('vert')) {
     try {
@@ -110,10 +116,19 @@ function ppmOf(canvas: HTMLCanvasElement): ImageLike {
  * gives the app the worker only after the start. So the start keeps the Web
  * Worker (see spawnedBy) and stops it when the start fails. Without this,
  * each Retry, book or setting change left one more worker, each with the
- * WebAssembly core in its memory.
+ * WebAssembly core in its memory. An abort of `signal` during the start
+ * fails the start with the reason of the abort.
  */
-function startWorker(lang: string, onProgress: (p: number) => void): Promise<TesseractWorker> {
+function startWorker(
+  lang: string,
+  onProgress: (p: number) => void,
+  signal?: AbortSignal,
+): Promise<TesseractWorker> {
   return new Promise((resolve, reject) => {
+    if (signal?.aborted) {
+      reject(signal.reason);
+      return;
+    }
     let settled = false;
     let spawned: Worker | undefined;
     const fail = (err: unknown): void => {
@@ -136,6 +151,7 @@ function startWorker(lang: string, onProgress: (p: number) => void): Promise<Tes
       }),
     );
     spawned = made.worker;
+    signal?.addEventListener('abort', () => fail(signal.reason), { once: true });
     made.result.then((worker) => {
       settled = true;
       resolve(worker);

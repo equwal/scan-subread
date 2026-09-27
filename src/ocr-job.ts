@@ -40,6 +40,14 @@ export function pageTimeLimit(pixels: number): number {
   return PAGE_LIMIT_MS * Math.max(1, pixels / PAGE_LIMIT_PIXELS);
 }
 
+/**
+ * The time limit of the start of OCR: the worker and its core load from the
+ * app, and at the first run of a language its data loads from the network
+ * (a few MB). A download that stalls, for example behind the login page of a
+ * public Wi-Fi, does not end by itself. The limit is the same as for a page.
+ */
+export const START_LIMIT_MS = PAGE_LIMIT_MS;
+
 /** An OCR worker. In the app, it is tesseract.js (src/ocr.ts). */
 export interface OcrWorker<Image> {
   /** Rejects when the worker stops or fails before the page is read. */
@@ -49,7 +57,10 @@ export interface OcrWorker<Image> {
 
 /** The OCR of one reading of the book. */
 export interface OcrJob<Image> {
-  /** Starts a worker when no worker runs. Rejects with the start error. */
+  /**
+   * Starts a worker when no worker runs. Rejects with the start error, also
+   * with OcrStartError when the start takes longer than its time limit.
+   */
   start(): Promise<void>;
   /**
    * Reads one page. When the page fails or takes longer than `limitMs`, the
@@ -66,13 +77,56 @@ export interface OcrJob<Image> {
  * settle the page of a worker that crashed, so the time limit ends such a page,
  * and the reading goes on. A worker that did not start is not started again:
  * each page gets the same start error.
+ *
+ * A start that takes longer than `startLimitMs` rejects with OcrStartError.
+ * The signal that `startWorker` gets then aborts, with that error as its
+ * reason, so that the start can stop its worker. A stop of the job during a
+ * start aborts the signal too. A worker that starts after the limit stops.
  */
-export function createOcrJob<Image>(startWorker: () => Promise<OcrWorker<Image>>): OcrJob<Image> {
+export function createOcrJob<Image>(
+  startWorker: (signal: AbortSignal) => Promise<OcrWorker<Image>>,
+  startLimitMs = START_LIMIT_MS,
+): OcrJob<Image> {
   let running: Promise<OcrWorker<Image>> | undefined;
+  /** The control of the start that runs now, if any. */
+  let starting: AbortController | undefined;
   let stopped = false;
+
+  function startInTime(): Promise<OcrWorker<Image>> {
+    const control = new AbortController();
+    starting = control;
+    const started = startWorker(control.signal);
+    let timer: ReturnType<typeof setTimeout> | undefined;
+    const cut = new Promise<never>((_resolve, reject) => {
+      control.signal.addEventListener('abort', () => reject(control.signal.reason), {
+        once: true,
+      });
+      timer = setTimeout(() => {
+        const s = Math.round(startLimitMs / 1000);
+        control.abort(new OcrStartError(new Error(`The start took more than ${s} s.`)));
+      }, startLimitMs);
+    });
+    const end = (): void => {
+      clearTimeout(timer);
+      if (starting === control) starting = undefined;
+    };
+    return Promise.race([started, cut]).then(
+      (ocr) => {
+        end();
+        return ocr;
+      },
+      (err: unknown) => {
+        end();
+        // A worker that starts after the cut stops at once.
+        stopOcr(started);
+        throw err;
+      },
+    );
+  }
+
   const worker = (): Promise<OcrWorker<Image>> => {
     if (stopped) return Promise.reject(new Error('OCR stopped.'));
-    running ??= startWorker();
+    running ??= startInTime();
     return running;
   };
   return {
@@ -102,6 +156,7 @@ export function createOcrJob<Image>(startWorker: () => Promise<OcrWorker<Image>>
     },
     stop() {
       stopped = true;
+      starting?.abort(new Error('OCR stopped.'));
       stopOcr(running);
       running = undefined;
     },
