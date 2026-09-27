@@ -59,8 +59,11 @@ body {
   cursor: pointer;
 }
 
-#topbar button:hover:not(:disabled) {
-  background: #8882;
+/* A touch screen keeps the hover state on the last button that was tapped. */
+@media (hover: hover) {
+  #topbar button:hover:not(:disabled) {
+    background: #8882;
+  }
 }
 
 #topbar button:active:not(:disabled) {
