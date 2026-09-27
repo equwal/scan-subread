@@ -165,6 +165,13 @@ It is a setting of the book: another book opens with its own setting.
 The status strip says which one was used for each page. A new setting
 stops the OCR of the reading before at once.
 
+The app renders a scanned page to a canvas 1600 pixels wide. tesseract.js
+gets the pixels of the canvas as a PPM image: a short text header and the
+RGB bytes. The app does not give it the canvas itself. With a canvas,
+tesseract.js first makes a PNG file, and on a test phone (Android
+WebView) that took about 13 s for each page. The PPM image takes
+milliseconds and has the same pixels, so OCR gives the same tokens.
+
 Both give the same tokens: one box per character with a line id and a
 word id. The alignment, the mark, the page turn and the lookup work the
 same way on a scan and on a text PDF.
@@ -270,8 +277,9 @@ npm run format:check
 network. `npm run test:e2e` runs real OCR on the fixture images in Node
 and checks that every cue is marked on the correct line and page, and
 reads the text-layer PDFs with pdf.js in Node and checks that the text
-layer gives every character in order. It needs network on the first run
-to fetch language data into `.tessdata/`.
+layer gives every character in order. It also checks that OCR reads the
+same symbols from a PPM image of a page as from its PNG file. It needs
+network on the first run to fetch language data into `.tessdata/`.
 
 `npm run fixtures` rebuilds the fixtures from `fixtures/sample-text.ts`.
 The Japanese text-layer PDF needs `C:\Windows\Fonts\yumin.ttf`; without
@@ -406,7 +414,8 @@ Development:
   fixtures (render text to a page image, wrap it in an image-only PDF,
   write the same text as a text-layer PDF, write a silent WAV).
   `@pdf-lib/fontkit` lets pdf-lib embed a TrueType font for the
-  Japanese text-layer page.
+  Japanese text-layer page. `sharp` also gives the e2e test the RGBA
+  pixels of a page image, for the PPM image.
 
 The SRT/VTT parser is written by hand (`src/subtitles.ts`). The `subtitle`
 package imports the Node `stream` module at load time, so it does not run
@@ -427,6 +436,8 @@ in a browser bundle.
   and the audio element (web).
 - `src/text-layer.ts`: pure conversion of pdf.js text items to tokens.
 - `src/ocr-tokens.ts`: pure conversion of a tesseract result to tokens.
+- `src/ppm.ts`: pure PPM image of the pixels of a page canvas, for
+  tesseract.js.
 - `src/align.ts`: pure alignment of subtitle cues to the page text.
 - `src/subtitles.ts`: pure SRT/VTT parser and active-cue lookup.
 - `src/hit-test.ts`: pure tap on the page. Hit test, scan string, the

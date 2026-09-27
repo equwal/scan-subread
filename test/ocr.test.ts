@@ -1,3 +1,4 @@
+import type Tesseract from 'tesseract.js';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import { createOcr, OcrStartError } from '../src/ocr';
 
@@ -20,9 +21,18 @@ function options(): Options {
 function fakeWorker() {
   return {
     setParameters: vi.fn(() => Promise.resolve({})),
-    recognize: vi.fn(() => Promise.reject(new Error('The image is empty.'))),
+    recognize: vi.fn((_image: unknown): Promise<{ data: Pick<Tesseract.Page, 'blocks'> }> =>
+      Promise.reject(new Error('The image is empty.')),
+    ),
     terminate: vi.fn(() => Promise.resolve({})),
   };
+}
+
+/** A page canvas of 2 x 1 pixels: red, then blue with half alpha. */
+function fakeCanvas(): HTMLCanvasElement {
+  const data = new Uint8ClampedArray([255, 0, 0, 255, 0, 0, 255, 128]);
+  const context = { getImageData: () => ({ width: 2, height: 1, data }) };
+  return { width: 2, height: 1, getContext: () => context } as unknown as HTMLCanvasElement;
 }
 
 /** A path on the origin of the app, for example "/assets/worker.min-abc.js". */
@@ -97,7 +107,7 @@ describe('createOcr', () => {
     worker.recognize.mockImplementation(() => new Promise(() => undefined));
     createWorker.mockResolvedValue(worker);
     const ocr = await createOcr('eng', () => undefined);
-    const page = ocr.recognize({} as HTMLCanvasElement, 0);
+    const page = ocr.recognize(fakeCanvas(), 0);
     await ocr.terminate();
     await expect(page).rejects.toThrow('OCR stopped.');
     expect(worker.terminate).toHaveBeenCalledTimes(1);
@@ -106,8 +116,23 @@ describe('createOcr', () => {
   it('gives the error of a page as it is, not as OcrStartError', async () => {
     createWorker.mockResolvedValue(fakeWorker());
     const ocr = await createOcr('eng', () => undefined);
-    const error = await ocr.recognize({} as HTMLCanvasElement, 0).catch((e: unknown) => e);
+    const error = await ocr.recognize(fakeCanvas(), 0).catch((e: unknown) => e);
     expect(error).toEqual(new Error('The image is empty.'));
     expect(error).not.toBeInstanceOf(OcrStartError);
+  });
+
+  it('gives tesseract.js a PPM file of the canvas pixels, not the canvas', async () => {
+    // tesseract.js makes a PNG file of a canvas with canvas.toBlob. The phone
+    // finding: that took about 13 s for each page in the Android WebView.
+    const worker = fakeWorker();
+    worker.recognize.mockResolvedValue({ data: { blocks: [] } });
+    createWorker.mockResolvedValue(worker);
+    const ocr = await createOcr('eng', () => undefined);
+    await expect(ocr.recognize(fakeCanvas(), 0)).resolves.toEqual([]);
+    const image = worker.recognize.mock.calls[0]?.[0];
+    expect(image).toBeInstanceOf(Uint8Array);
+    // The header, then red and blue. The alpha is dropped.
+    const header = [...Buffer.from('P6\n2 1\n255\n', 'latin1')];
+    expect(Array.from(image as Uint8Array)).toEqual([...header, 255, 0, 0, 0, 0, 255]);
   });
 });

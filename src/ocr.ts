@@ -5,7 +5,7 @@
 // comes from jsDelivr at the first OCR run of each language. tesseract.js
 // keeps it in IndexedDB after that.
 
-import { createWorker, PSM, type Worker as TesseractWorker } from 'tesseract.js';
+import { createWorker, PSM, type ImageLike, type Worker as TesseractWorker } from 'tesseract.js';
 // Vite copies the two files into the build and gives their URLs.
 import workerPath from 'tesseract.js/dist/worker.min.js?url';
 // One core file that holds the WebAssembly, so the worker makes one request.
@@ -15,6 +15,7 @@ import corePath from 'tesseract.js-core/tesseract-core-simd-lstm.wasm.js?url';
 import type { OcrToken } from './align';
 import { OcrStartError } from './ocr-job';
 import { pageToTokens } from './ocr-tokens';
+import { imageToPpm } from './ppm';
 
 export { OcrStartError };
 
@@ -54,9 +55,9 @@ export async function createOcr(lang: string, onProgress: (p: number) => void): 
   // A stop while no page runs is no error.
   stopped.catch(() => undefined);
   return {
-    recognize(image, pageIndex) {
+    async recognize(canvas, pageIndex) {
       const page = worker
-        .recognize(image, {}, { blocks: true, text: false })
+        .recognize(ppmOf(canvas), {}, { blocks: true, text: false })
         .then(({ data }) => pageToTokens(data, pageIndex));
       return Promise.race([page, stopped]);
     },
@@ -65,6 +66,26 @@ export async function createOcr(lang: string, onProgress: (p: number) => void): 
       await worker.terminate();
     },
   };
+}
+
+/**
+ * The pixels of a page canvas as a PPM file. tesseract.js makes a PNG file of
+ * a canvas with canvas.toBlob, and in the Android WebView of the test phone
+ * that took about 13 s for each page. The PPM file has the same pixels, so the
+ * OCR gives the same tokens (test/e2e/ocr-ppm.test.ts). The ImageData is not
+ * kept after the conversion.
+ */
+function ppmOf(canvas: HTMLCanvasElement): ImageLike {
+  // pdf.js made the context with willReadFrequently (its default without
+  // enableHWA), so getImageData reads memory and not the GPU.
+  const context = canvas.getContext('2d', { willReadFrequently: true });
+  if (!context) throw new Error('The page canvas has no 2D context.');
+  const ppm = imageToPpm(context.getImageData(0, 0, canvas.width, canvas.height));
+  // tesseract.js uses the bytes of an image file as they are: its loadImage
+  // returns `new Uint8Array(image)` for an input that is not a string, an
+  // element, a canvas or a Blob (src/worker/browser/loadImage.js). Its type
+  // ImageLike does not list Uint8Array.
+  return ppm as unknown as ImageLike;
 }
 
 /**
