@@ -489,10 +489,13 @@ in a browser bundle.
 - `src/read-order.ts`: pure order in which the pages are read.
 - `src/book-text.ts`: pure tokens to the book text for SubRead.
 - `src/book-open.ts`: pure rules for the open of a book: the open
-  attempts, and the book of subtitles that load during an open.
+  attempts, the book of subtitles that load during an open, the restore
+  of the last book, the error of an open that failed, and the meta data
+  that comes after the open.
 - `src/book-subtitles.ts`: pure rules for the subtitles of a book: the
-  subtitles when a book opens, the result file name for SubRead, and the
-  checks before a SubRead result loads.
+  subtitles when a book opens, the result file name for SubRead, the
+  checks before a SubRead result loads, and the SubRead status of the
+  menu when a book opens.
 - `src/sentence.ts`: pure sentence around a token.
 - `src/anki-card.ts`: pure fields of an Anki card for a long press.
 - `src/suite.ts`: pure checklist of the SubRead suite.
