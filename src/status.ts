@@ -1,6 +1,10 @@
 // The status strip under the top bar. It has three parts: the player,
 // the reading of the pages, and the last event. Only the event part is a
 // live region, because the other parts change often.
+//
+// The strip is one line of a fixed height, so the page under it never
+// moves. A long text ends with an ellipsis, and its title attribute holds
+// the full text.
 
 import type { ActionId, Message } from './messages';
 
@@ -23,11 +27,15 @@ const event = el('status');
 let fadeTimer: ReturnType<typeof setTimeout> | undefined;
 
 /**
- * Writes a message into `target`: the text, then the link or the button. A
- * click on the button runs the handler of onAction.
+ * Writes a message into `target`: the text in its own element, so that the
+ * strip can cut it with an ellipsis, then the link or the button. A click
+ * on the button runs the handler of onAction.
  */
 export function fill(target: HTMLElement, m: Message): void {
-  target.textContent = m.text;
+  const text = document.createElement('span');
+  text.className = 'text';
+  text.textContent = m.text;
+  target.replaceChildren(text);
   if (m.link) {
     const a = document.createElement('a');
     a.href = m.link.href;
@@ -44,6 +52,13 @@ export function fill(target: HTMLElement, m: Message): void {
     button.textContent = m.action.text;
     target.append(' ', button);
   }
+}
+
+/** Writes a message into a part of the strip, with the full text in the title attribute. */
+function fillPart(target: HTMLElement, m: Message): void {
+  fill(target, m);
+  if (m.text) target.title = m.text;
+  else target.removeAttribute('title');
 }
 
 let runAction: ((id: ActionId) => void) | null = null;
@@ -70,24 +85,25 @@ export function showPlayer(m: Message | null): void {
   if (key === lastPlayer) return;
   lastPlayer = key;
   player.hidden = m === null;
-  fill(player, m ?? { text: '' });
+  fillPart(player, m ?? { text: '' });
 }
 
 /** Shows how far the reading of the pages is. Null hides this part. */
 export function showReading(m: Message | string | null): void {
   reading.hidden = m === null;
-  fill(reading, typeof m === 'string' ? { text: m } : (m ?? { text: '' }));
+  fillPart(reading, typeof m === 'string' ? { text: m } : (m ?? { text: '' }));
 }
 
 /** Shows an event, for example a lookup or an error. It fades after EVENT_MS. */
 export function say(m: Message | string): void {
-  fill(event, typeof m === 'string' ? { text: m } : m);
+  fillPart(event, typeof m === 'string' ? { text: m } : m);
   event.classList.remove('faded');
   clearTimeout(fadeTimer);
   fadeTimer = setTimeout(() => {
     event.classList.add('faded');
     fadeTimer = setTimeout(() => {
       event.replaceChildren();
+      event.removeAttribute('title');
       event.classList.remove('faded');
     }, FADE_MS);
   }, EVENT_MS);
