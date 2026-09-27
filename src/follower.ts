@@ -1,21 +1,36 @@
 // The reader follows the audio: which cue to mark, which page to show. Pure.
 //
-// The alignment gives each matched cue a page. This reducer turns a change
-// of the cue into at most one highlight and one page turn.
+// At each step the follow compares the page of the audio (see audioPage
+// in cue-pages.ts) with the page shown, and turns the page when they
+// differ. A page turn by the user holds the follow: the page stays until
+// the audio reaches it, the audio jumps, or the user asks to follow again.
 
 export type FollowMode = 'highlight' | 'pages' | 'off';
 
+/**
+ * Why the follow runs.
+ *
+ * - `tick`: a new state of the clock in the normal run.
+ * - `realign`: the alignment changed, because a page was read.
+ * - `seek`: the audio jumped. The player jumped, or the user moved the
+ *   audio from this app.
+ * - `follow`: the user asked to follow: the Follow button, or a new
+ *   follow mode.
+ */
+export type FollowEvent = 'tick' | 'realign' | 'seek' | 'follow';
+
 export interface FollowInput {
-  /** The page of each cue, from the alignment. Null for an unmatched cue. */
-  cuePages: readonly (number | null)[];
   mode: FollowMode;
   currentPage: number;
-  /** The cue of the last call, or -1. */
-  previousCue: number;
-  /** The cue of now, or -1 between cues. */
+  /** The cue of now, or -1 before the first cue. */
   cue: number;
-  /** True when the audio jumped: a seek, not the normal run forward. */
-  seeked: boolean;
+  /** True when the cue of now is matched: it has tokens on a page. */
+  matched: boolean;
+  /** The page of the audio now, or null when no page stands for the cue of now. */
+  page: number | null;
+  /** True while a page turn by the user holds the follow. */
+  held: boolean;
+  event: FollowEvent;
 }
 
 export interface FollowOutput {
@@ -23,60 +38,28 @@ export interface FollowOutput {
   highlightCue: number | null;
   /** The page to show, or null to stay. */
   turnToPage: number | null;
-}
-
-/** How many cues back an unmatched cue borrows the page of a matched one. */
-export const LOOKBACK = 5;
-
-const NOTHING: FollowOutput = { highlightCue: null, turnToPage: null };
-
-/**
- * The page that stands for `cue`: its own page when the cue is matched,
- * else the page of the nearest matched cue before it, within LOOKBACK.
- * Null when there is none.
- */
-export function pageForCue(cuePages: readonly (number | null)[], cue: number): number | null {
-  for (let i = cue; i >= 0 && i >= cue - LOOKBACK; i--) {
-    const page = cuePages[i];
-    if (page !== null && page !== undefined) return page;
-  }
-  return null;
-}
-
-/**
- * True when a new alignment moves the cue: its own page changed (for
- * example, it became matched), or the page that stands for it changed.
- * Only then must the follow act again after an alignment. Else a page
- * that the user turned by hand stays.
- */
-export function cueMoved(
-  before: readonly (number | null)[],
-  after: readonly (number | null)[],
-  cue: number,
-): boolean {
-  if (cue < 0) return false;
-  return (
-    (before[cue] ?? null) !== (after[cue] ?? null) ||
-    pageForCue(before, cue) !== pageForCue(after, cue)
-  );
+  /** True when the follow stays held. */
+  held: boolean;
 }
 
 /**
  * One step of the follow.
  *
- * `off` does nothing. The same cue as before, without a seek, does nothing
- * either: the user can turn pages by hand while a long cue plays. A page
- * turn happens when the page of the cue is not the current page. In
- * `highlight` mode a matched cue is marked; in `pages` mode nothing is.
+ * A seek or the Follow button ends the hold. The hold also ends when the
+ * audio is on the page shown. A tick or a new alignment does not end it.
+ * While the follow is held, the page does not turn. Else the page turns
+ * when the page of the audio is not the page shown. In `highlight` mode a
+ * matched cue is marked, also while the follow is held: the mark shows
+ * only on the page of the cue. `off` does nothing.
  */
 export function follow(input: FollowInput): FollowOutput {
-  const { cuePages, mode, currentPage, previousCue, cue, seeked } = input;
-  if (mode === 'off' || cue < 0 || cue >= cuePages.length) return NOTHING;
-  if (cue === previousCue && !seeked) return NOTHING;
-  const own = cuePages[cue] ?? null;
-  const page = pageForCue(cuePages, cue);
+  const { mode, currentPage, cue, matched, page, event } = input;
+  let held = input.held && (event === 'tick' || event === 'realign');
+  if (mode === 'off' || cue < 0) return { highlightCue: null, turnToPage: null, held };
+  if (page === currentPage) held = false;
   return {
-    highlightCue: mode === 'highlight' && own !== null ? cue : null,
-    turnToPage: page !== null && page !== currentPage ? page : null,
+    highlightCue: mode === 'highlight' && matched ? cue : null,
+    turnToPage: !held && page !== null && page !== currentPage ? page : null,
+    held,
   };
 }

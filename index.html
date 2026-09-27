@@ -8,15 +8,69 @@
   </head>
   <body>
     <header id="topbar">
-      <button id="menu" aria-controls="panel" aria-expanded="false">Menu</button>
-      <button id="prev">Prev</button>
-      <span id="page-label">No PDF</span>
-      <button id="next">Next</button>
-      <button id="play" title="Play or pause the audiobook" disabled>▶</button>
-      <button id="sync-page" title="Move the audio to the first cue on this page" disabled>
-        Audio → page
+      <button
+        id="menu"
+        class="icon"
+        aria-controls="panel"
+        aria-expanded="false"
+        aria-label="Menu"
+        title="Menu"
+      >
+        <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M4 7h16M4 12h16M4 17h16" /></svg>
+      </button>
+      <button id="page-left" class="icon" aria-label="Previous page" title="Previous page" disabled>
+        <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M15 5l-7 7 7 7" /></svg>
+      </button>
+      <button id="page-label" title="Go to a page" disabled>No PDF</button>
+      <input
+        id="page-input"
+        type="text"
+        inputmode="numeric"
+        enterkeyhint="go"
+        autocomplete="off"
+        aria-label="Go to page"
+        title="Type a page number. Enter goes, Escape cancels."
+        hidden
+      />
+      <button id="page-right" class="icon" aria-label="Next page" title="Next page" disabled>
+        <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M9 5l7 7-7 7" /></svg>
+      </button>
+      <button id="play" class="icon" aria-label="Play" title="Play" disabled>
+        <svg class="i-play" viewBox="0 0 24 24" aria-hidden="true">
+          <path class="solid" d="M8 5.5v13l10.5-6.5z" />
+        </svg>
+        <svg class="i-pause" viewBox="0 0 24 24" aria-hidden="true">
+          <path class="solid" d="M6.5 5h4v14h-4zM13.5 5h4v14h-4z" />
+        </svg>
+      </button>
+      <button
+        id="sync-page"
+        class="icon"
+        aria-label="Move the audio to this page"
+        title="Move the audio to this page"
+        disabled
+      >
+        <svg viewBox="0 0 24 24" aria-hidden="true">
+          <path d="M6 3h8.5L19 7.5V21H6z" />
+          <path class="solid" d="M10 10v7l5.5-3.5z" />
+        </svg>
+      </button>
+      <button
+        id="follow-now"
+        aria-label="Follow the audio again"
+        title="Follow the audio again: go to its page"
+        hidden
+      >
+        Follow
       </button>
     </header>
+
+    <div id="strip">
+      <span id="player-status"></span>
+      <span id="follow-note" hidden>Follow paused</span>
+      <span id="pages-status" hidden></span>
+      <span id="status" aria-live="polite"></span>
+    </div>
 
     <aside id="panel">
       <h1>Scan Subread</h1>
@@ -52,11 +106,6 @@
         <audio id="audio" controls></audio>
       </section>
 
-      <div id="player-status" class="hint">Player: not read yet.</div>
-      <div id="pages-status" class="hint"></div>
-      <div id="status" aria-live="polite"></div>
-      <progress id="progress" max="1" value="0" hidden></progress>
-
       <fieldset id="follow">
         <legend>Follow the audio</legend>
         <label
@@ -77,16 +126,19 @@
         </select>
       </label>
       <label class="check"
+        ><input id="rtl" type="checkbox" /> Pages turn right to left (vertical Japanese)</label
+      >
+      <label class="check"
         ><input id="force-ocr" type="checkbox" /> Force OCR (the text layer of the PDF is
         wrong)</label
       >
-      <label
+      <label id="dict-row"
         >Dictionary
         <select id="dict">
           <option value="">Ask each time</option>
         </select>
       </label>
-      <label class="check"
+      <label id="pause-row" class="check"
         ><input id="pause-lookup" type="checkbox" checked /> Pause on lookup</label
       >
       <div class="row">
@@ -98,7 +150,20 @@
 
     <main id="main">
       <div id="viewer">
-        <div id="page">
+        <section id="empty" class="card">
+          <h2>Scan Subread</h2>
+          <p>
+            Read a PDF along with its audiobook. The page follows the narrator, and a tap on a word
+            looks it up.
+          </p>
+          <button id="open-pdf" class="primary">Open a PDF</button>
+          <p class="hint">
+            Then open its subtitles (.srt or .vtt) in the menu, or make them with SubRead on
+            Android.
+          </p>
+          <div id="suite-checklist"></div>
+        </section>
+        <div id="page" hidden>
           <div id="overlay"></div>
         </div>
       </div>

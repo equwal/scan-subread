@@ -22,40 +22,81 @@ open.
 
 ## How to use it
 
-1. Open the menu (the "Menu" button on a phone; the left panel on a
-   desktop).
-2. Load a PDF. The app reads the pages at once: the current page first,
-   then the pages after it to the end, then the pages before it. "Pages"
-   in the menu shows how far it is.
-3. Load the subtitles, or on Android press "Make subtitles with SubRead":
-   pick the audiobook, and SubRead makes the `.srt` from the audio and
-   the text of the pages read so far. The result loads at once, is kept
-   for this PDF, and can be shared as a file.
-4. Start the player. The status line shows its position. The page
+1. Press "Open a PDF" on the start card, or open the menu (the `☰`
+   button on a phone; the left panel on a desktop) and load a PDF there.
+   The app reads the pages at once: the current page first, then the
+   pages after it to the end, then the pages before it. The status strip
+   shows how far it is.
+2. In the menu, load the subtitles, or on Android press "Make subtitles
+   with SubRead": pick the audiobook, and SubRead makes the `.srt` from
+   the audio and the text of the pages read so far. The result loads at
+   once, is kept for this PDF, and can be shared as a file.
+3. Start the player. The status strip shows its position. The page
    follows.
+
+On a phone the menu is a drawer over the page. A tap outside the drawer
+only closes it. The drawer also closes after you choose a file or a cue.
+
+### The status strip
+
+The strip under the top bar shows three things:
+
+- The player: its time, and "playing" or "paused". When there is a
+  problem, it says what to do, for example "Allow notification access in
+  SubRead Overlay." "Follow paused" shows while a page turn by hand holds
+  the follow.
+- The reading of the pages, for example "Reading 3/40 · page 5: OCR 45%".
+  It goes away when all pages are read.
+- The last event, for example a lookup or an error. It fades after 6
+  seconds. Screen readers read this part.
 
 ### The three follow modes
 
 - **Highlight and turn pages**: the line of the current cue is marked on
-  the page, and the page turns when the cue is on another page.
+  the page, and the page turns when the cue is on another page. When the
+  mark goes out of view, the page scrolls so that the mark is in the
+  upper third. It does not scroll in the 3 seconds after you scroll.
 - **Turn pages only**: the page turns, no mark. Use this when the
   alignment is not good enough for a mark, for example with a noisy scan.
-- **Off**: the page does not move. The status line and the cue list
+- **Off**: the page does not move. The status strip and the cue list
   still show where the player is.
 
 A cue that the alignment did not find in the book has no page. In the
 two follow modes the page then follows the nearest matched cue before it,
-up to five cues back. The same cue does not turn the page twice: you can
-turn pages by hand while a long cue plays, and the page follows again at
-the next cue. A new alignment after a page is read turns the page only
-when it finds the cue of now for the first time or moves it to another
-page.
+up to five cues back. A cue at a page break has text on two pages. The
+page turns inside that cue: the first page shows for the share of the
+text of the cue on it, then the next page.
+
+When you turn a page yourself (an arrow, a key, a swipe or the page
+jump), the follow holds: the page does not turn by itself, and a
+"Follow" button shows in the top bar. The mark still shows when the cue
+of now is on the page that you look at. The hold ends when you press
+"Follow", when the audio reaches the page that you look at, when you
+move the audio from the app (the cue list or "move the audio to this
+page"), or when the player jumps. A new alignment after a page is read
+does not end the hold.
 
 ### The top bar
 
-Prev and Next turn the page. `▶` and `⏸` control the player. "Audio →
-page" moves the player to the first cue on the page you look at, the
-same as "Move the audio to this page" in the KOReader plugin.
+From the left: the menu, the previous page, the page label, the next
+page, play or pause, and "move the audio to this page". The last one
+moves the player to where the text of the page starts, the same as "Move
+the audio to this page" in the KOReader plugin. When that text starts in
+a cue from the page before, the audio goes into the cue, at the share of
+the text on the page before. The button is off while no subtitles are
+loaded, and while the player has no position or reports a problem.
+
+Other ways to turn pages:
+
+- The keys ArrowRight, ArrowLeft, PageDown and PageUp.
+- A swipe to the left or to the right on the page. A page that you
+  zoomed in on does not turn: the swipe moves the page.
+- The page label: press it, type a page number, and press Enter. Escape
+  or a tap outside cancels.
+
+The setting "Pages turn right to left (vertical Japanese)" makes
+ArrowLeft, a swipe to the right and the left arrow go to the next page.
+It is on for the OCR language "Japanese, vertical" until you set it.
 
 ### Text layer or OCR
 
@@ -63,7 +104,7 @@ The app reads the text layer of a page first. When the page has fewer
 than 10 characters of text, it is a scan: the app renders the page and
 runs OCR (tesseract.js) in the language of the "OCR language" setting.
 "Force OCR" skips the text layer, for a PDF whose text layer is wrong.
-The status line says which one was used for each page.
+The status strip says which one was used for each page.
 
 Both give the same tokens: one box per character with a line id and a
 word id. The alignment, the mark, the page turn and the lookup work the
@@ -76,16 +117,26 @@ them.
 
 ### Lookups
 
-A tap on a character sends the text from that character to the end of
-its line (at most 40 characters) to the dictionary. When the line ends
-within 4 characters, the next line of the page follows, so a word that
-wraps is whole. "Dictionary" lists every app in the text selection menu;
-"Ask each time" shows the Android chooser. "Pause on lookup" pauses the
-player before the dictionary opens and starts it again when the
-dictionary closes.
+A tap sends the text from the tapped word to the end of its line (at
+most 40 characters) to the dictionary. A tap may land up to about 24
+CSS pixels from a character, the size of a finger. In Latin script the
+text starts at the first letter of the tapped word. In Japanese and
+Chinese it starts at the tapped character, because a dictionary app
+scans from there. Punctuation at the start is skipped, and a tap on
+punctuation only sends nothing. When the line ends within 4 characters
+and does not end a sentence, the next line of the page follows, so a
+word that wraps is whole. A tap on a page that is not read yet tells
+how many pages are read.
+
+"Dictionary" lists every app in the text selection menu; "Ask each
+time" shows the Android chooser. "Pause on lookup" pauses the player
+before the dictionary opens and starts it again when the dictionary
+closes. When the player cannot pause, the lookup still runs.
 
 On the web there is no dictionary app: the tap copies the text to the
-clipboard and shows it in the status line.
+clipboard, and the strip shows "Copied" or "Copy failed" with the text.
+The web does not pause the audio, and it has no "Dictionary" and no
+"Pause on lookup" setting.
 
 ### The web
 
@@ -228,8 +279,10 @@ Notes:
   is needed.
 - The pdf.js worker is part of the bundle.
 - Pinch zoom is on (`zoomEnabled` in `capacitor.config.ts`). The page
-  fits the screen width in portrait and the screen height in landscape.
-  Zoom in and scroll to read small print.
+  fits the screen width in each orientation, up to 1000 CSS pixels, and
+  it renders again at the resolution of the screen after a rotation.
+  Zoom in and scroll to read small print. On a zoomed page a swipe moves
+  the page and does not turn it.
 - The page cache and the subtitles live in the WebView's IndexedDB.
   Uninstalling the app deletes them.
 
@@ -266,8 +319,11 @@ in a browser bundle.
   Overlay. A port of `player_state.lua` from the KOReader plugin.
 - `src/play-clock.ts`: pure clock: the position now from a report of
   the player. A port of `PlayClock.kt` from SubRead Overlay.
-- `src/follower.ts`: pure reducer: a change of the cue to a mark and a
-  page turn, in the three follow modes.
+- `src/follower.ts`: pure reducer: the cue of now and the page of the
+  audio to a mark and a page turn, in the three follow modes, with the
+  hold after a page turn by the user.
+- `src/cue-pages.ts`: pure parts of each cue on the pages, the page of
+  the audio at a time, and the time where the text of a page starts.
 - `src/clock-source.ts`: the two time sources, the overlay (Android)
   and the audio element (web).
 - `src/text-layer.ts`: pure conversion of pdf.js text items to tokens.
@@ -277,14 +333,24 @@ in a browser bundle.
 - `src/hit-test.ts`: pure tap on the page. Hit test, scan string, the
   lookup text.
 - `src/line-boxes.ts`: pure boxes that mark a cue, one for each text
-  line of the page.
+  line of the page, grown to the edges of its words.
+- `src/paging.ts`: pure page turns from keys, swipes and the arrows, the
+  page jump, and the reading direction.
+- `src/scroll.ts`: pure scroll position that brings the mark into view.
+- `src/messages.ts`: pure texts of the status strip.
 - `src/read-order.ts`: pure order in which the pages are read.
 - `src/book-text.ts`: pure tokens to the book text for SubRead.
 - `src/subread.ts`: the typed side of the plugin, with the web fallback.
 - `src/token-cache.ts`: IndexedDB store for the page tokens and the
   subtitles (thin).
 - `src/ocr.ts`, `src/pdf.ts`: thin browser wrappers around the libraries.
-- `src/main.ts`: UI wiring.
+- `src/view.ts`: the page view: render to fit the width, draw the mark,
+  scroll to it, render again on a resize.
+- `src/nav.ts`: page turns by the user: the arrows, the keys, the swipe
+  and the page jump.
+- `src/status.ts`: the status strip.
+- `src/drawer.ts`: the menu, a drawer on a phone.
+- `src/main.ts`: UI wiring: the book, the subtitles and the follow.
 - `test/`: unit and property tests. `test/e2e/`: OCR and text-layer
   end-to-end tests.
 - `fixtures/`, `scripts/make-fixtures.ts`: synthetic scanned pages and

@@ -2,7 +2,14 @@ import fc from 'fast-check';
 import { describe, expect, it } from 'vitest';
 import type { OcrToken } from '../src/align';
 import { isCjk } from '../src/book-text';
-import { LOOKUP_LENGTH, lookupText, scanText, tokenAt } from '../src/hit-test';
+import {
+  LOOKUP_LENGTH,
+  lookupText,
+  scanText,
+  TAP_CSS,
+  tapTolerance,
+  tokenAt,
+} from '../src/hit-test';
 
 /** Tokens for one page: `lines` laid out left to right, 10 px per character. */
 function tokensOf(lines: string[], page = 0): OcrToken[] {
@@ -48,6 +55,28 @@ describe('tokenAt', () => {
   it('looks only at the given page', () => {
     expect(tokenAt(tokens, 1, 5, 5, 5)).toBe(5);
     expect(tokenAt(tokens, 2, 5, 5, 5)).toBe(-1);
+  });
+});
+
+describe('tapTolerance', () => {
+  it('converts the CSS pixels of a finger to page pixels', () => {
+    expect(tapTolerance(1600, 400)).toBe(TAP_CSS * 4);
+    expect(tapTolerance(1600, 800)).toBe(TAP_CSS * 2);
+  });
+
+  it('gets smaller when the page is zoomed in', () => {
+    expect(tapTolerance(1600, 400, 2)).toBe(TAP_CSS * 2);
+    expect(tapTolerance(1600, 400, 0.5)).toBe(TAP_CSS * 4);
+  });
+
+  it('finds a character 20 CSS pixels from a tap on a phone', () => {
+    // A 1600-pixel page on a phone, 344 CSS pixels wide. The old tolerance,
+    // 1.5% of the page width, was 24 page pixels: about 5 CSS pixels.
+    const page = tokensOf(['abc']);
+    const scale = 1600 / 344;
+    const x = page[2]!.bbox.x1 + 20 * scale;
+    expect(tokenAt(page, 0, x, 10, 0.015 * 1600)).toBe(-1);
+    expect(tokenAt(page, 0, x, 10, tapTolerance(1600, 344))).toBe(2);
   });
 });
 
