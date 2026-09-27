@@ -18,7 +18,7 @@ Binaries: https://github.com/equwal/scan-subread/releases/download/v%v/Scan-SubR
 Builds:
   - versionName: 0.1.1
     versionCode: 2
-    commit: v0.1.1
+    commit: ee358f5dc39c207d210be2ab39181992bd8e0f53
     subdir: android/app
     sudo:
       - curl -Lo node.tar.gz https://nodejs.org/dist/v22.23.3/node-v22.23.3-linux-x64.tar.gz
