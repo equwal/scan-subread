@@ -22,6 +22,7 @@ import {
   playerProblem,
   readingEndMessage,
   readingText,
+  shownInPlayerPart,
   subreadErrorText,
   subreadQuestion,
   subreadResultText,
@@ -77,6 +78,23 @@ describe('playerProblem', () => {
 
   it('gives null for another reason', () => {
     expect(playerProblem('malformed', true)).toBeNull();
+  });
+});
+
+describe('shownInPlayerPart', () => {
+  it('does not repeat the problem that the player part shows', () => {
+    // The phone finding: after play, the strip said the same sentence twice.
+    expect(
+      shownInPlayerPart(new PlayerError('no_notification_access'), 'no_notification_access'),
+    ).toBe(true);
+    expect(shownInPlayerPart(new PlayerError('no_player'), 'no_player')).toBe(true);
+  });
+
+  it('tells another error, or a problem that the player part does not show', () => {
+    expect(shownInPlayerPart(new PlayerError('no_player'), null)).toBe(false);
+    expect(shownInPlayerPart(new PlayerError('no_player'), undefined)).toBe(false);
+    expect(shownInPlayerPart(new PlayerError('no_overlay'), 'no_player')).toBe(false);
+    expect(shownInPlayerPart(new Error('no_player'), 'no_player')).toBe(false);
   });
 });
 

@@ -103,6 +103,15 @@ export function errorMessage(err: unknown, android: boolean, overlayInstalled = 
   return { text: String(err) };
 }
 
+/**
+ * True when `err` is a PlayerError for the problem of the last player state
+ * (`playerError`). The player part of the strip shows that problem, so the
+ * event part does not say it again.
+ */
+export function shownInPlayerPart(err: unknown, playerError: string | null | undefined): boolean {
+  return err instanceof PlayerError && err.reason === playerError;
+}
+
 /** The player part of the strip: the time and the play state, or the problem. */
 export function playerMessage(
   s: ClockState | null,

@@ -36,6 +36,7 @@ import {
   playerMessage,
   readingEndMessage,
   readingText,
+  shownInPlayerPart,
   SUBREAD_NOT_INSTALLED,
   subreadErrorText,
   subreadQuestion,
@@ -281,8 +282,13 @@ function setForceOcr(on: boolean): void {
   showReadingPart();
 }
 
-/** Shows a command that failed in the strip. */
+/**
+ * Shows a command that failed in the strip. The player part shows the
+ * problem of the player while a book is open, so the event part does not
+ * say it again.
+ */
 function sayError(err: unknown): void {
+  if (state.pdf && shownInPlayerPart(err, state.clock?.error)) return;
   say(errorMessage(err, isAndroid, overlayInstalled()));
 }
 
