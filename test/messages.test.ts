@@ -2,6 +2,9 @@ import fc from 'fast-check';
 import { describe, expect, it } from 'vitest';
 import { PlayerError, type ClockState } from '../src/clock-source';
 import {
+  ANKI_RELEASES,
+  ANKI_WEB_TEXT,
+  ankiText,
   clockText,
   errorMessage,
   matchedText,
@@ -204,6 +207,25 @@ describe('the end of the reading', () => {
       action: retry,
     });
     expect(withForceOcr({ text: 'Reading 1/2' }, false)).toEqual({ text: 'Reading 1/2' });
+  });
+});
+
+describe('ankiText', () => {
+  it('tells the result of SubRead Anki', () => {
+    expect(ankiText({ added: true })).toEqual({ text: 'Card added to Anki.' });
+    expect(ankiText({ error: 'not_installed' })).toEqual({
+      text: 'SubRead Anki is not installed.',
+      link: { href: ANKI_RELEASES, text: 'Get SubRead Anki' },
+    });
+    expect(ankiText({ error: 'cannot_start' })).toEqual({ text: 'SubRead Anki could not start.' });
+  });
+
+  it('says nothing when the user closed the card', () => {
+    expect(ankiText({ added: false })).toBeNull();
+  });
+
+  it('tells the web that cards need Android', () => {
+    expect(ANKI_WEB_TEXT).toBe('Anki cards need SubRead Anki on Android.');
   });
 });
 

@@ -14,6 +14,23 @@ export interface Message {
 
 export const OVERLAY_RELEASES = 'https://github.com/equwal/subread-overlay/releases/latest';
 export const SUBREAD_RELEASES = 'https://github.com/equwal/subread-android/releases/latest';
+export const DICTIONARY_RELEASES = 'https://github.com/equwal/subread-dictionary/releases/latest';
+export const ANKI_RELEASES = 'https://github.com/equwal/subread-anki/releases/latest';
+
+/** A long press on the web: there is no SubRead Anki. */
+export const ANKI_WEB_TEXT = 'Anki cards need SubRead Anki on Android.';
+
+/** The result of SubRead Anki in the strip. Null when the user closed the card. */
+export function ankiText(result: { added?: boolean; error?: string }): Message | null {
+  if (result.error === 'not_installed') {
+    return {
+      text: 'SubRead Anki is not installed.',
+      link: { href: ANKI_RELEASES, text: 'Get SubRead Anki' },
+    };
+  }
+  if (result.error !== undefined) return { text: 'SubRead Anki could not start.' };
+  return result.added ? { text: 'Card added to Anki.' } : null;
+}
 
 /** "1 page", "2 pages". */
 function count(n: number, noun: string): string {

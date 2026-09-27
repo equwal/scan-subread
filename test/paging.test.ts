@@ -5,6 +5,8 @@ import {
   arrowStep,
   defaultRtl,
   keyStep,
+  LONG_PRESS_MOVE,
+  movedTooFar,
   parsePage,
   SWIPE_MIN,
   SWIPE_RATIO,
@@ -13,6 +15,25 @@ import {
 } from '../src/paging';
 
 const flat = { zoomed: false, wide: false };
+
+describe('movedTooFar', () => {
+  it('lets a finger shake up to 10 CSS pixels in a long press', () => {
+    expect(LONG_PRESS_MOVE).toBe(10);
+    expect(movedTooFar(0, 0)).toBe(false);
+    expect(movedTooFar(6, -8)).toBe(false);
+    expect(movedTooFar(7, 8)).toBe(true);
+  });
+
+  it('never gives a long press for a swipe that turns a page', () => {
+    // A swipe, a tap and a long press never mix.
+    const move = fc.integer({ min: -400, max: 400 });
+    fc.assert(
+      fc.property(move, move, fc.boolean(), (dx, dy, rtl) => {
+        if (swipeStep({ dx, dy, ...flat }, rtl) !== 0) expect(movedTooFar(dx, dy)).toBe(true);
+      }),
+    );
+  });
+});
 
 describe('keyStep', () => {
   it('turns with the arrow keys and the page keys', () => {

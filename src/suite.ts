@@ -1,11 +1,15 @@
 // The checklist of the SubRead suite: which apps are on the device, and
 // what to do for an app that is missing. Pure: no DOM.
 
-import { OPEN_OVERLAY, OVERLAY_RELEASES, SUBREAD_RELEASES, type Message } from './messages';
+import {
+  ANKI_RELEASES,
+  DICTIONARY_RELEASES,
+  OPEN_OVERLAY,
+  OVERLAY_RELEASES,
+  SUBREAD_RELEASES,
+  type Message,
+} from './messages';
 import type { SuiteApps } from './subread';
-
-export const DICTIONARY_RELEASES = 'https://github.com/equwal/subread-dictionary/releases/latest';
-export const ANKI_RELEASES = 'https://github.com/equwal/subread-anki/releases/latest';
 
 /** One line of the checklist. `ok` is true when the app is ready. */
 export interface ChecklistItem extends Message {

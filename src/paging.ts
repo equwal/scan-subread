@@ -12,6 +12,17 @@ export const SWIPE_MIN = 50;
 /** A swipe turns a page only when its horizontal move is more than this times its vertical move. */
 export const SWIPE_RATIO = 1.5;
 
+/** A press this long, in milliseconds, without a move is a long press: an Anki card. */
+export const LONG_PRESS_MS = 500;
+
+/** A finger that moves more than this, in CSS pixels, makes no long press. */
+export const LONG_PRESS_MOVE = 10;
+
+/** True when the finger moved too far for a long press. Such a move can be a swipe. */
+export function movedTooFar(dx: number, dy: number): boolean {
+  return Math.hypot(dx, dy) > LONG_PRESS_MOVE;
+}
+
 /** The step of a key, or 0 for a key that turns no page. */
 export function keyStep(key: string, rtl: boolean): Step | 0 {
   switch (key) {

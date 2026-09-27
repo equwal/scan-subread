@@ -412,6 +412,10 @@ body.zoomed #viewer {
   margin: 0 auto;
   width: 100%;
   max-width: 1000px;
+  /* A long press makes an Anki card: no selection, no image menu. */
+  -webkit-user-select: none;
+  user-select: none;
+  -webkit-touch-callout: none;
 }
 
 #page canvas {

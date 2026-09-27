@@ -1,7 +1,12 @@
 import { describe, expect, it } from 'vitest';
-import { OVERLAY_RELEASES, SUBREAD_RELEASES } from '../src/messages';
+import {
+  ANKI_RELEASES,
+  DICTIONARY_RELEASES,
+  OVERLAY_RELEASES,
+  SUBREAD_RELEASES,
+} from '../src/messages';
 import type { SuiteApps } from '../src/subread';
-import { ANKI_RELEASES, DICTIONARY_RELEASES, suiteChecklist } from '../src/suite';
+import { suiteChecklist } from '../src/suite';
 
 const openOverlay = { id: 'open-overlay', text: 'Open SubRead Overlay' };
 

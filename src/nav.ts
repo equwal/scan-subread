@@ -1,11 +1,21 @@
 // Page turns by the user: the arrows of the top bar, the keys, a swipe on
-// the viewer, and the page jump of the page label. The decisions are in
-// paging.ts.
+// the viewer, and the page jump of the page label. Also the long press on
+// the viewer, because it shares the pointer events of the swipe. The
+// decisions are in paging.ts.
 
-import { arrowsOff, arrowStep, keyStep, parsePage, swipeStep, type Step } from './paging';
+import {
+  arrowsOff,
+  arrowStep,
+  keyStep,
+  LONG_PRESS_MS,
+  movedTooFar,
+  parsePage,
+  swipeStep,
+  type Step,
+} from './paging';
 import { say } from './status';
 
-/** A click this soon after the end of a swipe comes from the swipe, and does no lookup. */
+/** A click this soon after the end of a swipe or a long press comes from it, and does no lookup. */
 const CLICK_AFTER_SWIPE_MS = 400;
 
 /** A click this soon after the tap that cancels the page jump comes from that tap. */
@@ -46,8 +56,17 @@ function zoomed(): boolean {
   return (window.visualViewport?.scale ?? 1) > ZOOMED;
 }
 
-/** `turnTo(index)` shows the page that the user asked for. */
-export function setupNav(ui: NavElements, s: NavState, turnTo: (index: number) => void): Nav {
+/**
+ * `turnTo(index)` shows the page that the user asked for. `longPress(x, y)`
+ * gets a long press on the viewer, in client pixels, and gives true when
+ * it used it. Then the click that follows does nothing.
+ */
+export function setupNav(
+  ui: NavElements,
+  s: NavState,
+  turnTo: (index: number) => void,
+  longPress: (x: number, y: number) => boolean,
+): Nav {
   function go(step: Step): void {
     const to = s.current() + step;
     if (to >= 0 && to < s.pages()) turnTo(to);
@@ -92,20 +111,57 @@ export function setupNav(ui: NavElements, s: NavState, turnTo: (index: number) =
   window.visualViewport?.addEventListener('resize', markZoom);
   markZoom();
 
-  let start: { id: number; x: number; y: number } | null = null;
+  // One finger on the viewer gives a tap, a swipe or a long press, never
+  // two of them. A move of more than LONG_PRESS_MOVE stops the long press,
+  // and a long press is no swipe.
+
+  /** The finger on the viewer: where it went down, and true after its long press. */
+  let start: { id: number; x: number; y: number; pressed: boolean } | null = null;
+  let pressTimer: ReturnType<typeof setTimeout> | undefined;
   let swipedAt = -Infinity;
   ui.viewer.addEventListener('pointerdown', (e) => {
-    // A second finger makes a pinch, not a swipe.
-    start = e.isPrimary ? { id: e.pointerId, x: e.clientX, y: e.clientY } : null;
+    clearTimeout(pressTimer);
+    // A second finger makes a pinch. The right mouse button opens the menu of the browser.
+    if (!e.isPrimary || e.button !== 0) {
+      start = null;
+      return;
+    }
+    const finger = { id: e.pointerId, x: e.clientX, y: e.clientY, pressed: false };
+    start = finger;
+    pressTimer = setTimeout(() => {
+      if (start !== finger || s.drawerOpen()) return;
+      finger.pressed = longPress(finger.x, finger.y);
+    }, LONG_PRESS_MS);
+  });
+  ui.viewer.addEventListener('pointermove', (e) => {
+    if (
+      start &&
+      e.pointerId === start.id &&
+      movedTooFar(e.clientX - start.x, e.clientY - start.y)
+    ) {
+      clearTimeout(pressTimer);
+    }
   });
   ui.viewer.addEventListener('pointercancel', () => {
+    clearTimeout(pressTimer);
     start = null;
+  });
+  // Android shows a menu for a long press on the page. The long press makes a card instead.
+  ui.viewer.addEventListener('contextmenu', (e) => {
+    if (start) e.preventDefault();
   });
   ui.viewer.addEventListener('pointerup', (e) => {
     if (!start || e.pointerId !== start.id) return;
+    clearTimeout(pressTimer);
     const dx = e.clientX - start.x;
     const dy = e.clientY - start.y;
+    const pressed = start.pressed;
     start = null;
+    // The click after a long press is not a tap on a word.
+    if (pressed) {
+      swipedAt = e.timeStamp;
+      return;
+    }
     if (s.drawerOpen()) return;
     const v = ui.viewer;
     const step = swipeStep(

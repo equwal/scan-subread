@@ -7,6 +7,7 @@
 
 import { App } from '@capacitor/app';
 import { createAligner, type Aligner, type OcrToken, type TokenSpan } from './align';
+import { ankiCard, cardSource } from './anki-card';
 import { backStep, keepScreenOn } from './app-state';
 import { resultName, srtName, subreadConcerns, subtitlesOnOpen } from './book-subtitles';
 import { bookText } from './book-text';
@@ -17,6 +18,8 @@ import { follow, type FollowEvent, type FollowMode } from './follower';
 import { lookupText, tapTolerance, tokenAt } from './hit-test';
 import { lineBoxes, padBox } from './line-boxes';
 import {
+  ANKI_WEB_TEXT,
+  ankiText,
   CLEAR_ALL_QUESTION,
   clearBookQuestion,
   clockText,
@@ -50,7 +53,7 @@ import type { PdfDoc } from './pdf';
 import { nextPage } from './read-order';
 import { scrollTarget } from './scroll';
 import { fill, onAction, say, showPlayer, showReading } from './status';
-import { isAndroid, SubRead, type SubtitlesResult, type SuiteApps } from './subread';
+import { isAndroid, SubRead, type AnkiCard, type SubtitlesResult, type SuiteApps } from './subread';
 import { suiteChecklist } from './suite';
 import { decodeSubtitles, lastCueAt, parseSubtitles, type Cue } from './subtitles';
 import {
@@ -201,6 +204,7 @@ const nav = setupNav(
     drawerOpen: drawer.covers,
   },
   turnByUser,
+  longPress,
 );
 
 // --- Settings ---
@@ -1243,33 +1247,78 @@ async function showPage(index: number): Promise<void> {
 
 // --- Tap on a word ---
 
-/** Tap on the page: send the text under the tap to the dictionary. */
-ui.page.addEventListener('click', (e) => {
+/**
+ * The token under a point of the screen, in client pixels: an index of
+ * state.tokens, or -1 when no token is near. Null when the point is not on
+ * the page, or the page is not read yet: then the strip tells how many
+ * pages are read.
+ */
+function tokenAtPoint(clientX: number, clientY: number): number | null {
   const canvas = ui.page.querySelector('canvas');
   const pdf = state.pdf;
-  if (!canvas || !pdf) return;
+  if (!canvas || !pdf || ui.page.hidden) return null;
+  const rect = canvas.getBoundingClientRect();
+  const inside =
+    clientX >= rect.left && clientX <= rect.right && clientY >= rect.top && clientY <= rect.bottom;
+  if (!inside) return null;
   const size = state.pages[state.currentPage];
   if (!size) {
     say(notReadText(state.pages.filter((p) => p).length, pdf.numPages));
-    return;
+    return null;
   }
-  const rect = canvas.getBoundingClientRect();
-  const x = ((e.clientX - rect.left) / rect.width) * size.width;
-  const y = ((e.clientY - rect.top) / rect.height) * size.height;
+  const x = ((clientX - rect.left) / rect.width) * size.width;
+  const y = ((clientY - rect.top) / rect.height) * size.height;
   const zoom = window.visualViewport?.scale ?? 1;
-  const t = tokenAt(
-    state.tokens,
-    state.currentPage,
-    x,
-    y,
-    tapTolerance(size.width, rect.width, zoom),
-  );
-  if (t < 0) return;
+  return tokenAt(state.tokens, state.currentPage, x, y, tapTolerance(size.width, rect.width, zoom));
+}
+
+/** Tap on the page: send the text under the tap to the dictionary. */
+ui.page.addEventListener('click', (e) => {
+  const t = tokenAtPoint(e.clientX, e.clientY);
+  if (t === null || t < 0) return;
   const text = lookupText(state.tokens, t);
   // A tap on punctuation only gives no text.
   if (text === '') return;
   void (isAndroid ? lookUp(text) : copy(text));
 });
+
+/**
+ * Long press on the page: a card in SubRead Anki for the word and its
+ * sentence (ankiCard). Gives true when the press was on a word, so that
+ * the click after it does no lookup.
+ */
+function longPress(clientX: number, clientY: number): boolean {
+  const index = tokenAtPoint(clientX, clientY);
+  const file = state.file;
+  if (index === null || index < 0 || !file) return false;
+  if (!isAndroid) {
+    say(ANKI_WEB_TEXT);
+    return true;
+  }
+  const card = ankiCard({
+    tokens: state.tokens,
+    index,
+    spans: state.spans,
+    markedCue: state.markedCue,
+    cues: state.cues,
+    source: cardSource(file.name, state.tokens[index]!.page),
+  });
+  if (card) void addCard(card);
+  return true;
+}
+
+/** Sends the card to SubRead Anki. "Pause on lookup" pauses the player while the card shows. */
+async function addCard(card: AnkiCard): Promise<void> {
+  await withPause(async () => {
+    try {
+      const m = ankiText(await SubRead.ankiAdd(card));
+      if (m) say(m);
+    } catch (err) {
+      say(`Anki card failed: ${String(err)}`);
+    }
+    return true;
+  });
+}
 
 /** The web has no dictionary app: the text goes to the clipboard. */
 async function copy(text: string): Promise<void> {
@@ -1281,13 +1330,27 @@ async function copy(text: string): Promise<void> {
   }
 }
 
-/**
- * Sends the text to the dictionary app. With "Pause on lookup", the
- * player pauses first and plays again when the dictionary closes. When
- * the pause fails, the lookup still runs.
- */
+/** Sends the text to the dictionary app, with "Pause on lookup". */
 async function lookUp(text: string): Promise<void> {
   say(`Lookup: "${text}"`);
+  await withPause(async () => {
+    // Play again when the dictionary closed, or when it did not open.
+    try {
+      return (await SubRead.lookup({ text })).closed;
+    } catch (err) {
+      say(`Lookup failed: ${String(err)}`);
+      return true;
+    }
+  });
+}
+
+/**
+ * Runs `open`, an app over the reader: the dictionary or SubRead Anki.
+ * With "Pause on lookup", the player pauses first, and plays again when
+ * `open` gives true: the app closed. When the pause fails, `open` still
+ * runs.
+ */
+async function withPause(open: () => Promise<boolean>): Promise<void> {
   const pause = ui.pauseLookup.checked && state.clock?.playing === true && !state.lookupPaused;
   let paused = false;
   if (pause) {
@@ -1299,13 +1362,7 @@ async function lookUp(text: string): Promise<void> {
       sayError(err);
     }
   }
-  // Play again when the dictionary closed, or when it did not open.
-  let resume = true;
-  try {
-    ({ closed: resume } = await SubRead.lookup({ text }));
-  } catch (err) {
-    say(`Lookup failed: ${String(err)}`);
-  }
+  const resume = await open();
   try {
     if (paused && resume) await clock.play();
   } catch (err) {
