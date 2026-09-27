@@ -58,7 +58,7 @@ import {
   subreadQuestion,
   subreadResultText,
   UPDATING_CACHE_TEXT,
-  waitPagesText,
+  waitMessage,
   withForceOcr,
   type Message,
 } from './messages';
@@ -598,6 +598,9 @@ async function readPage(
 /** The OCR of the reading that runs now. */
 let readingOcr: OcrJob<HTMLCanvasElement> | undefined;
 
+/** True while readBook reads the pages. */
+let readingRuns = false;
+
 /**
  * Reads every page of the book: the current page first, then the pages
  * after it, then the pages before it. The cues are aligned again as pages
@@ -611,6 +614,7 @@ async function readBook(retry = false): Promise<void> {
   const { pdf, file } = state;
   if (!pdf || !file) return;
   const seq = ++state.readSeq;
+  readingRuns = true;
   // The OCR of the reading before stops at once. It does not finish its
   // page: two quick changes of a setting ran two OCR jobs at the same time.
   readingOcr?.stop();
@@ -622,6 +626,8 @@ async function readBook(retry = false): Promise<void> {
     state.cueParts = [];
     state.markedCue = -1;
   }
+  // A SubRead job that waits shows the reading again, for example after Retry.
+  startMakeWhenRead();
   const total = pdf.numPages;
   const pending = new Set(
     Array.from({ length: total }, (_, i) => i).filter((i) => !state.pages[i]),
@@ -697,7 +703,12 @@ async function readBook(retry = false): Promise<void> {
     if (seq === state.readSeq) say(`Cannot read the pages: ${String(err)}`);
   } finally {
     ocr.stop();
-    if (seq === state.readSeq) setReading(readingEndMessage(failed, startFailed));
+    if (seq === state.readSeq) {
+      readingRuns = false;
+      setReading(readingEndMessage(failed, startFailed));
+      // A SubRead job that waits now waits for pages that could not be read.
+      startMakeWhenRead();
+    }
   }
 }
 
@@ -880,14 +891,17 @@ ui.makeSubs.addEventListener('click', async () => {
 
 /**
  * Starts the SubRead job that waits, when all pages of its book are read.
- * Else tells how far the reading is. readBook calls this after each page.
+ * Else tells how far the reading is, or after the reading, how many pages
+ * could not be read, with Retry (waitMessage). readBook calls this after
+ * each page and at its end, so a Retry that reads those pages starts the job.
  */
 function startMakeWhenRead(): void {
   const wait = state.makeWait;
   const pdf = state.pdf;
   if (!wait || !pdf || wait.book !== state.book) return;
   if (!allPagesRead()) {
-    ui.makeStatus.textContent = waitPagesText(state.pages.filter((p) => p).length, pdf.numPages);
+    const read = state.pages.filter((p) => p).length;
+    fill(ui.makeStatus, waitMessage(read, pdf.numPages, readingRuns));
     return;
   }
   state.makeWait = null;

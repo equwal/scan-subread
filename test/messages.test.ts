@@ -26,9 +26,32 @@ import {
   subreadErrorText,
   subreadQuestion,
   subreadResultText,
+  waitMessage,
   waitPagesText,
   withForceOcr,
 } from '../src/messages';
+
+describe('waitMessage', () => {
+  const retry = { id: 'retry-reading', text: 'Retry' };
+
+  it('tells how far the reading is while it runs', () => {
+    expect(waitMessage(3, 40, true)).toEqual({ text: 'Reading pages 3/40 first...' });
+  });
+
+  it('tells after the reading that SubRead waits for the pages that could not be read', () => {
+    // The finding: after "2 pages could not be read." the menu still said
+    // "Reading pages 38/40 first...", and SubRead never started.
+    expect(waitMessage(38, 40, false)).toEqual({
+      text: 'SubRead waits for 2 pages that could not be read.',
+      action: retry,
+    });
+    // OCR could not start: no page of the scan is read.
+    expect(waitMessage(0, 1, false)).toEqual({
+      text: 'SubRead waits for 1 page that could not be read.',
+      action: retry,
+    });
+  });
+});
 
 function state(over: Partial<ClockState>): ClockState {
   return { positionMs: 0, playing: false, seeked: false, error: null, ...over };

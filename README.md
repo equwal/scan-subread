@@ -33,8 +33,10 @@ is open.
 2. In the menu, load the subtitles, or on Android press "Make subtitles
    with SubRead": pick the audiobook. SubRead starts when all pages are
    read ("Reading pages N/M first..."), and makes the `.srt` from the
-   audio and the text of the book. The result loads at once, is kept for
-   this PDF, and can be shared as a file.
+   audio and the text of the book. When pages could not be read, the
+   menu says "SubRead waits for 2 pages that could not be read." with
+   Retry, and SubRead starts when Retry reads them. The result loads at
+   once, is kept for this PDF, and can be shared as a file.
 3. Start the player. The status strip shows its position. The page
    follows.
 

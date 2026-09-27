@@ -184,6 +184,21 @@ export function waitPagesText(read: number, total: number): string {
   return `Reading pages ${read}/${total} first...`;
 }
 
+/**
+ * The make status while a SubRead job waits for the pages of its book.
+ * `reading` is true while the reading of the pages runs. After the reading,
+ * the pages that are not read could not be read: the job waits until Retry
+ * reads them. Before, the status kept "Reading pages 38/40 first...", and
+ * SubRead never started.
+ */
+export function waitMessage(read: number, total: number, reading: boolean): Message {
+  if (reading) return { text: waitPagesText(read, total) };
+  return {
+    text: `SubRead waits for ${count(total - read, 'page')} that could not be read.`,
+    action: RETRY,
+  };
+}
+
 /** What SubRead made: the cues, the language and the share of the lines found in the book. */
 export function subreadResultText(r: {
   cues?: number;
