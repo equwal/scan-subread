@@ -6,7 +6,7 @@
 // (the strip) and view.ts (the page).
 
 import { App } from '@capacitor/app';
-import { createAligner, type Aligner, type OcrToken, type TokenSpan } from './align';
+import { createAligner, shiftSpans, type Aligner, type OcrToken, type TokenSpan } from './align';
 import { ankiCard, cardSource } from './anki-card';
 import { backStep, keepScreenOn } from './app-state';
 import { resultName, srtName, subreadConcerns, subtitlesOnOpen } from './book-subtitles';
@@ -638,9 +638,12 @@ async function readBook(retry = false): Promise<void> {
       if (seq !== state.readSeq) return; // Another book or another setting took over.
       counts[entry.source]++;
       state.pages[page] = entry;
-      // Put the tokens of the page at their place in page order.
+      // Put the tokens of the page at their place in page order. The spans
+      // keep their tokens until the next alignment: the mark and the Anki
+      // card use them.
       const at = state.pages.slice(0, page).reduce((n, p) => n + (p?.tokens.length ?? 0), 0);
       state.tokens.splice(at, 0, ...entry.tokens);
+      state.spans = shiftSpans(state.spans, at, entry.tokens.length);
       const how = entry.source === 'text' ? 'text layer' : 'OCR';
       setReading(readingText(read(), total, `page ${page + 1}: ${how}`));
       if (page === state.currentPage) view.mark();
