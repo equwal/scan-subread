@@ -64,7 +64,7 @@ export interface SuiteApps {
   overlayDebug: boolean;
   /** The version name of SubRead, for example "0.10.0", or null without SubRead. */
   subread: string | null;
-  /** SubRead Anki. */
+  /** SubRead Anki, the release build or the debug build. */
   anki: boolean;
   /** The number of apps in the text selection menu (the `dictionaries` list), without this app. */
   dictionaries: number;
@@ -93,8 +93,9 @@ export interface SubReadPlugin {
   /** An empty component means: ask each time. */
   setDictionary(options: { component: string }): Promise<void>;
   /**
-   * Makes a card in SubRead Anki (`space.subread.anki.action.ADD`). Only the
-   * fields that are given and not empty go to SubRead Anki; without `word`
+   * Makes a card in SubRead Anki (`space.subread.anki.action.ADD`): the
+   * release build, else the debug build. Only the fields that are given and
+   * not empty go to SubRead Anki; without `word`
    * and `text` the call rejects. Resolves when SubRead Anki closes, the same
    * as `lookup`: `{ added: true, noteId }` when the note is in Anki,
    * `{ added: false }` when the user closed the card,

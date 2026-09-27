@@ -35,6 +35,7 @@ import java.io.OutputStream;
 import java.nio.charset.StandardCharsets;
 import java.util.ArrayList;
 import java.util.List;
+import java.util.function.Predicate;
 
 /**
  * The bridge to the SubRead suite.
@@ -87,7 +88,8 @@ public class SubReadPlugin extends Plugin {
     /** The folder in filesDir for the result files of SubRead. See file_paths.xml. */
     private static final String RESULT_DIR = "subread";
 
-    private static final String ANKI_PACKAGE = "space.subread.anki";
+    /** The release build of SubRead Anki first, then the debug build. */
+    private static final String[] ANKI_PACKAGES = { "space.subread.anki", "space.subread.anki.debug" };
     private static final String ACTION_ANKI_ADD = "space.subread.anki.action.ADD";
     private static final String EXTRA_ANKI_WORD = "space.subread.anki.extra.WORD";
     private static final String EXTRA_ANKI_READING = "space.subread.anki.extra.READING";
@@ -321,10 +323,13 @@ public class SubReadPlugin extends Plugin {
         if (value != null && !value.isEmpty()) intent.putExtra(extra, value);
     }
 
-    /** Asks SubRead Anki to make a card. SubRead Anki needs a word or a text. */
+    /**
+     * Asks SubRead Anki to make a card: the release build, else the debug
+     * build. SubRead Anki needs a word or a text.
+     */
     @PluginMethod
     public void ankiAdd(PluginCall call) {
-        Intent add = new Intent(ACTION_ANKI_ADD).setPackage(ANKI_PACKAGE);
+        Intent add = new Intent(ACTION_ANKI_ADD);
         putText(add, call, "word", EXTRA_ANKI_WORD);
         putText(add, call, "reading", EXTRA_ANKI_READING);
         putText(add, call, "sentence", EXTRA_ANKI_SENTENCE);
@@ -336,10 +341,13 @@ public class SubReadPlugin extends Plugin {
         }
         Boolean show = call.getBoolean("show");
         if (show != null) add.putExtra(EXTRA_ANKI_SHOW, show.booleanValue());
-        if (add.resolveActivity(getContext().getPackageManager()) == null) {
+        PackageManager pm = getContext().getPackageManager();
+        String anki = firstInstalled(ANKI_PACKAGES, name -> new Intent(add).setPackage(name).resolveActivity(pm) != null);
+        if (anki == null) {
             call.resolve(errorObject("not_installed"));
             return;
         }
+        add.setPackage(anki);
         returns.launched();
         if (startForResult(call, add, "ankiResult") != null) call.resolve(errorObject("cannot_start"));
     }
@@ -361,6 +369,12 @@ public class SubReadPlugin extends Plugin {
     }
 
     // --- The suite ---
+
+    /** The first of `packages` that is installed, or null when none is installed. */
+    static String firstInstalled(String[] packages, Predicate<String> installed) {
+        for (String name : packages) if (installed.test(name)) return name;
+        return null;
+    }
 
     /** The package info of an installed app, or null when the app is not installed. */
     private PackageInfo packageInfo(String name) {
@@ -393,7 +407,7 @@ public class SubReadPlugin extends Plugin {
         ret.put("overlay", packageInfo(OVERLAY_PACKAGE) != null);
         ret.put("overlayDebug", packageInfo(OVERLAY_DEBUG_PACKAGE) != null);
         ret.put("subread", version);
-        ret.put("anki", packageInfo(ANKI_PACKAGE) != null);
+        ret.put("anki", firstInstalled(ANKI_PACKAGES, name -> packageInfo(name) != null) != null);
         ret.put("dictionaries", dictionaries);
         call.resolve(ret);
     }
@@ -681,6 +695,11 @@ public class SubReadPlugin extends Plugin {
                 .setType("text/plain")
                 .putExtra(Intent.EXTRA_STREAM, uri)
                 .addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION);
+            // The chooser reads the file for its preview. createChooser gives
+            // the chooser the clip of this intent, with the read grant. Without
+            // a clip the chooser has no grant, and its preview gets a
+            // SecurityException.
+            send.setClipData(ClipData.newRawUri(name, uri));
             getActivity().startActivity(Intent.createChooser(send, name));
             call.resolve();
         } catch (IOException | RuntimeException e) {
