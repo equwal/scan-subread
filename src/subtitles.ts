@@ -89,10 +89,3 @@ export function lastCueAt(cues: readonly Pick<Cue, 'start'>[], t: number): numbe
   }
   return found;
 }
-
-/** Index of the cue active at time t, or -1. Cues must be sorted by start. */
-export function cueIndexAt(cues: readonly Cue[], t: number): number {
-  const found = lastCueAt(cues, t);
-  if (found >= 0 && t < cues[found]!.end) return found;
-  return -1;
-}

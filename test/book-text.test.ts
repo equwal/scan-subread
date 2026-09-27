@@ -1,7 +1,7 @@
 import fc from 'fast-check';
 import { describe, expect, it } from 'vitest';
 import type { OcrToken } from '../src/align';
-import { bookText, joinWords, whisperCode } from '../src/book-text';
+import { bookText, joinWords } from '../src/book-text';
 
 const box = { x0: 0, y0: 0, x1: 1, y1: 1 };
 
@@ -107,14 +107,5 @@ describe('bookText', () => {
         expect(paragraphs(bookText(tokens))).toEqual(expected);
       }),
     );
-  });
-});
-
-describe('whisperCode', () => {
-  it('maps tesseract languages to Whisper codes', () => {
-    expect(whisperCode('jpn')).toBe('ja');
-    expect(whisperCode('jpn_vert')).toBe('ja');
-    expect(whisperCode('jpn+eng')).toBe('ja');
-    expect(whisperCode('eng')).toBe('en');
   });
 });

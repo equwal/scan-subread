@@ -84,8 +84,3 @@ export function bookText(tokens: readonly OcrToken[]): string {
   endPage();
   return pages.map((p) => p.join('\n')).join('\n\n') + (pages.length > 0 ? '\n' : '');
 }
-
-/** The Whisper language code for a tesseract language ("jpn", "jpn_vert", "jpn+eng", "eng"). */
-export function whisperCode(ocrLang: string): 'ja' | 'en' {
-  return ocrLang.startsWith('jpn') ? 'ja' : 'en';
-}

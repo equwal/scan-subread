@@ -17,14 +17,3 @@ export function positionAt(clock: PlayClock, nowMs: number): number {
   if (!clock.playing) return clock.positionMs;
   return clock.positionMs + (nowMs - clock.reportedAtMs) * clock.speed;
 }
-
-/**
- * How long to wait, on the clock of the device, until the media is at
- * `targetMs`. Null when the media does not move forward, or is already there.
- */
-export function waitUntil(clock: PlayClock, targetMs: number, nowMs: number): number | null {
-  if (!clock.playing || clock.speed <= 0) return null;
-  const left = targetMs - positionAt(clock, nowMs);
-  if (left <= 0) return null;
-  return Math.ceil(left / clock.speed);
-}

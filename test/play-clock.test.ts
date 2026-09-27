@@ -1,6 +1,6 @@
 import fc from 'fast-check';
 import { describe, expect, it } from 'vitest';
-import { positionAt, waitUntil, type PlayClock } from '../src/play-clock';
+import { positionAt, type PlayClock } from '../src/play-clock';
 
 const ms = fc.nat({ max: 10 ** 8 });
 const speed = fc.double({ min: 0.25, max: 4, noNaN: true, noDefaultInfinity: true });
@@ -41,38 +41,6 @@ describe('positionAt', () => {
         const d1 = positionAt(playing, now) - c.positionMs;
         const d2 = positionAt(faster, now) - c.positionMs;
         expect(d2).toBeCloseTo(d1 * k, 3);
-      }),
-    );
-  });
-});
-
-describe('waitUntil', () => {
-  it('gives the real time until the target', () => {
-    const c: PlayClock = { positionMs: 1000, reportedAtMs: 0, speed: 2, playing: true };
-    expect(waitUntil(c, 3000, 0)).toBe(1000);
-    expect(waitUntil(c, 3000, 500)).toBe(500);
-  });
-
-  it('gives null when paused or already past the target', () => {
-    const paused: PlayClock = { positionMs: 0, reportedAtMs: 0, speed: 1, playing: false };
-    expect(waitUntil(paused, 100, 0)).toBeNull();
-    const playing = { ...paused, playing: true };
-    expect(waitUntil(playing, 0, 0)).toBeNull();
-    expect(waitUntil(playing, -5, 0)).toBeNull();
-  });
-
-  it('lands on the target after the wait', () => {
-    fc.assert(
-      fc.property(clock, ms, ms, (c, now, target) => {
-        const playing = { ...c, playing: true };
-        const wait = waitUntil(playing, target, now);
-        if (wait === null) {
-          expect(positionAt(playing, now)).toBeGreaterThanOrEqual(target);
-        } else {
-          expect(wait).toBeGreaterThan(0);
-          // The wait is whole milliseconds; the float product can fall a hair short.
-          expect(positionAt(playing, now + wait)).toBeGreaterThanOrEqual(target - 1e-6);
-        }
       }),
     );
   });

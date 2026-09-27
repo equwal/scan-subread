@@ -51,8 +51,3 @@ export function parseState(line: string | null | undefined): PlayerState | Playe
     package: fields.get('package') ?? '',
   };
 }
-
-/** The argument of a seek call: the position in milliseconds, as a whole number. */
-export function seekArgument(ms: number): string {
-  return String(Math.max(0, Math.round(ms)));
-}

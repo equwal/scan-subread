@@ -1,6 +1,6 @@
 import fc from 'fast-check';
 import { describe, expect, it } from 'vitest';
-import { isPlayerError, parseState, seekArgument, type PlayerState } from '../src/player-state';
+import { isPlayerError, parseState, type PlayerState } from '../src/player-state';
 
 function state(line: string): PlayerState {
   const parsed = parseState(line);
@@ -52,15 +52,6 @@ describe('parseState', () => {
     expect(state('playing=1;position=5;speed=0').speed).toBe(1);
     expect(state('playing=1;position=5;speed=-2').speed).toBe(1);
     expect(state('playing=1;position=5').package).toBe('');
-  });
-
-  it('round trips a position through the seek argument', () => {
-    for (const ms of [0, 1, 1000, 96153, 3600500, 12345678.9]) {
-      const argument = seekArgument(ms);
-      expect(argument).toMatch(/^\d+$/);
-      expect(state(`playing=0;position=${argument}`).positionMs).toBeCloseTo(ms, -1);
-    }
-    expect(seekArgument(-3)).toBe('0');
   });
 
   it('round trips any state line', () => {

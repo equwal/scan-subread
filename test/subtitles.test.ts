@@ -1,6 +1,6 @@
 import fc from 'fast-check';
 import { describe, expect, it } from 'vitest';
-import { cueIndexAt, decodeSubtitles, lastCueAt, parseSubtitles } from '../src/subtitles';
+import { decodeSubtitles, lastCueAt, parseSubtitles } from '../src/subtitles';
 
 const SRT = `1
 00:00:01,000 --> 00:00:03,500
@@ -104,38 +104,6 @@ describe('decodeSubtitles', () => {
       fc.property(fc.string({ unit: 'binary' }), (text) => {
         // A BOM at the start is not text, so the decoder removes it.
         expect(decodeSubtitles(utf8(text))).toBe(text.replace(/^﻿/, ''));
-      }),
-    );
-  });
-});
-
-describe('cueIndexAt', () => {
-  const cues = parseSubtitles(SRT);
-
-  it('finds the active cue and returns -1 in gaps', () => {
-    expect(cueIndexAt(cues, 0.5)).toBe(-1);
-    expect(cueIndexAt(cues, 1)).toBe(0);
-    expect(cueIndexAt(cues, 3.49)).toBe(0);
-    expect(cueIndexAt(cues, 3.5)).toBe(1);
-    expect(cueIndexAt(cues, 6)).toBe(-1);
-  });
-
-  it('agrees with a linear scan over non-overlapping cues', () => {
-    // Each item is (gap before the cue, cue length).
-    const gapsAndLengths = fc.array(fc.tuple(fc.nat({ max: 20 }), fc.nat({ max: 20 })), {
-      maxLength: 30,
-    });
-    fc.assert(
-      fc.property(gapsAndLengths, fc.nat({ max: 1300 }), (items, t) => {
-        let clock = 0;
-        const sorted = items.map(([gap, len]) => {
-          const start = clock + gap;
-          clock = start + len;
-          return { start, end: clock, text: 'x' };
-        });
-        const got = cueIndexAt(sorted, t);
-        const linear = sorted.findIndex((c) => c.start <= t && t < c.end);
-        expect(got).toBe(linear);
       }),
     );
   });
