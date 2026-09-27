@@ -12,13 +12,16 @@ SubRead suite:
   looks the words up.
 - [SubRead](https://github.com/equwal/subread-android) makes the subtitle
   file (`.srt`) from the audiobook and the text of the book.
+- [SubRead Anki](https://github.com/equwal/subread-anki) makes an Anki
+  card from a word and its sentence.
 
 You load a PDF and the `.srt` of its audiobook. The app reads the text
 of each page, aligns each subtitle cue to it, and follows the player: it
 marks the line that the narrator reads and turns the page. Tap a word,
 and the text from that word to the end of the line goes to the
-dictionary of your choice. The player pauses while the dictionary is
-open.
+dictionary of your choice. Press a word for half a second, and SubRead
+Anki makes a card. The player pauses while the dictionary or the card
+is open.
 
 ## How to use it
 
@@ -28,14 +31,62 @@ open.
    pages after it to the end, then the pages before it. The status strip
    shows how far it is.
 2. In the menu, load the subtitles, or on Android press "Make subtitles
-   with SubRead": pick the audiobook, and SubRead makes the `.srt` from
-   the audio and the text of the pages read so far. The result loads at
-   once, is kept for this PDF, and can be shared as a file.
+   with SubRead": pick the audiobook. SubRead starts when all pages are
+   read ("Reading pages N/M first..."), and makes the `.srt` from the
+   audio and the text of the book. The result loads at once, is kept for
+   this PDF, and can be shared as a file.
 3. Start the player. The status strip shows its position. The page
    follows.
 
 On a phone the menu is a drawer over the page. A tap outside the drawer
 only closes it. The drawer also closes after you choose a file or a cue.
+
+The subtitles field takes each file, because a browser download of an
+`.srt` often has the type `application/octet-stream`. A file with no
+subtitle lines, for example a PDF, keeps the subtitles that are loaded.
+The app reads a subtitle file in UTF-8, UTF-16 or Shift_JIS. A PDF that
+does not open keeps the book that is open. A file of 0 bytes, for
+example a file that another app still writes, gives "The file is empty
+or not ready."
+
+### The book is kept
+
+The app keeps a copy of the last book, its page, its subtitles and its
+"Force OCR" setting in IndexedDB. At start it opens the last book at
+its page, with its subtitles, without a picker. Android stops the
+reader while you are in the dictionary or in the player app, and the
+reader comes back where you were. When the copy cannot be read, for
+example after the app storage was cleared, the app forgets it and shows
+the start card.
+
+Subtitles belong to a book. Another book opens with its own subtitles,
+or with none. Subtitles that you load while no book is open are for the
+book that you open next. The page goes to the meta data of the book one
+second after it changes.
+
+The first start after an upgrade from a build with the old dictionary
+can take long: the upgrade deletes about 86 MB of dictionary data. The
+strip then says "Updating the page cache...", and the start card shows.
+
+### Android: Back, the screen and the suite
+
+- Back closes the page jump, else the drawer, else puts the reader in
+  the background. It never closes the reader, so the reader keeps its
+  state.
+- The screen stays on while a book is open, the player plays and the
+  follow is not off. In the background the app does not read the
+  player.
+- The start card and the menu show the SubRead suite: SubRead Overlay
+  (with its notification access), the dictionary apps, SubRead and
+  SubRead Anki, each with a link to its releases when it is missing.
+  "Open SubRead Overlay" opens the overlay, so that you can give it
+  notification access.
+- SubRead can finish while Android has stopped the reader. SubRead
+  0.10.0 and later write the `.srt` into a result file of the book, and
+  the reader loads it when the book opens or the app comes back.
+- Before the subtitles of SubRead load, the app asks when they replace
+  a file that you loaded, when SubRead found another language than the
+  one of the book, and when it found less than 80% of the lines.
 
 ### The status strip
 
@@ -43,10 +94,15 @@ The strip under the top bar shows three things:
 
 - The player: its time, and "playing" or "paused". When there is a
   problem, it says what to do, for example "Allow notification access in
-  SubRead Overlay." "Follow paused" shows while a page turn by hand holds
-  the follow.
+  SubRead Overlay." with an "Open SubRead Overlay" button. Play and
+  "move the audio to this page" are off while the player cannot work.
+  "Follow paused" shows while a page turn by hand holds the follow.
 - The reading of the pages, for example "Reading 3/40 · page 5: OCR 45%".
-  It goes away when all pages are read.
+  It goes away when all pages are read. A page that cannot be read does
+  not stop the others: at the end the strip says "2 pages could not be
+  read." with Retry, which reads only those pages. When OCR cannot
+  start, for example with no network on the first run, the strip says
+  so, with Retry. "Force OCR is on" shows while it is on for the book.
 - The last event, for example a lookup or an error. It fades after 6
   seconds. Screen readers read this part.
 
@@ -104,7 +160,9 @@ The app reads the text layer of a page first. When the page has fewer
 than 10 characters of text, it is a scan: the app renders the page and
 runs OCR (tesseract.js) in the language of the "OCR language" setting.
 "Force OCR" skips the text layer, for a PDF whose text layer is wrong.
-The status strip says which one was used for each page.
+It is a setting of the book: another book opens with its own setting.
+The status strip says which one was used for each page. A new setting
+stops the OCR of the reading before at once.
 
 Both give the same tokens: one box per character with a line id and a
 word id. The alignment, the mark, the page turn and the lookup work the
@@ -112,8 +170,8 @@ same way on a scan and on a text PDF.
 
 The tokens of each page are kept in IndexedDB, under the file name, the
 file size, the page, the OCR language and the source. A book that was
-read once aligns at once the next time. "Clear the page cache" removes
-them.
+read once aligns at once the next time. "Clear this book's pages" and
+"Clear all pages" remove them, after a question.
 
 ### Lookups
 
@@ -138,6 +196,25 @@ clipboard, and the strip shows "Copied" or "Copy failed" with the text.
 The web does not pause the audio, and it has no "Dictionary" and no
 "Pause on lookup" setting.
 
+### Anki cards
+
+Press a word for half a second, without a move of more than 10 CSS
+pixels: SubRead Anki shows a card. A move turns the long press into a
+swipe or a scroll, and the click after a long press does no lookup.
+
+- The sentence is the text of the marked cue when the word is in it,
+  else the sentence around the word on its page.
+- For a Japanese or Chinese word, the card gets the sentence only, and
+  you tap the word in SubRead Anki: OCR does not show where such a word
+  ends. For another word, the card also gets the word, without the
+  punctuation at its edges.
+- The source is the book name and the page, for example
+  "sample-eng-2p, p. 1".
+- "Pause on lookup" pauses the player while the card shows.
+
+The strip says "Card added to Anki." when the card is in Anki. The web
+says "Anki cards need SubRead Anki on Android."
+
 ### The web
 
 The browser has no SubRead Overlay. The "Audio (web only)" field plays
@@ -161,9 +238,10 @@ One cue of that file crosses from page 1 to page 2. `sample-jpn.pdf`
 and `sample-jpn-text.pdf` go with `sample-jpn.srt` and the "Japanese,
 horizontal" OCR language.
 
-The first OCR run downloads the tesseract worker, its WebAssembly core
-and the language data from jsDelivr. The browser caches the language
-data in IndexedDB after that.
+The app serves the tesseract.js worker and its WebAssembly core from its
+own files. The first OCR run of a language downloads the language data
+from jsDelivr. The browser keeps the language data in IndexedDB after
+that.
 
 ## Check
 
@@ -218,11 +296,22 @@ the bridge to the suite:
   resolves when the dictionary closes.
 - `dictionaries`, `setDictionary`: the apps that take that intent, and
   the chosen one.
-- `makeSubtitles`, `pickAudio`: the intent API of SubRead
-  (`space.subread.app.action.ALIGN`). The book text goes to SubRead
-  through a FileProvider. When SubRead is not installed, the menu links
-  to its releases.
-- `shareText`: the share sheet, for the finished `.srt`.
+- `makeSubtitles`, `pickAudio`, `pendingSubtitles`: the intent API of
+  SubRead (`space.subread.app.action.ALIGN`). The book text goes to
+  SubRead through a FileProvider. SubRead 0.10.0 and later also write
+  the `.srt` into a result file of the book (`subread-<hash>.srt`), and
+  `pendingSubtitles` reads it. When SubRead is not installed, the menu
+  links to its releases.
+- `ankiAdd`: `space.subread.anki.action.ADD`, a card in SubRead Anki
+  (the release build, else the debug build).
+- `suite`: which apps of the suite are installed. `openOverlay`: opens
+  SubRead Overlay for its notification access.
+- `keepAwake`: keeps the screen on.
+- `shareText`: the share sheet, for the finished `.srt`. The file Uri is
+  in the clip of the intent, so the preview of the chooser can read it.
+
+The `@capacitor/app` plugin gives the Back button and the app state
+(front or background).
 
 `capacitor.config.ts` holds the app id, the app name and the web
 directory. The `android/` project is the Capacitor template and is
@@ -273,17 +362,18 @@ Notes:
 - The WebView serves the app from `https://localhost`. The file fields
   open the Android file chooser. Put your PDFs and `.srt` files in
   `Download` to find them fast.
-- The first OCR run needs network. tesseract.js fetches its worker, its
-  WebAssembly core and the language data from jsDelivr over HTTPS. The
-  `INTERNET` permission is in the manifest. No cleartext traffic setting
-  is needed.
+- The first OCR run of a language needs network: tesseract.js fetches
+  the language data from jsDelivr over HTTPS. The worker and the
+  WebAssembly core are in the app. The `INTERNET` permission is in the
+  manifest. No cleartext traffic setting is needed.
 - The pdf.js worker is part of the bundle.
 - Pinch zoom is on (`zoomEnabled` in `capacitor.config.ts`). The page
   fits the screen width in each orientation, up to 1000 CSS pixels, and
   it renders again at the resolution of the screen after a rotation.
   Zoom in and scroll to read small print. On a zoomed page a swipe moves
   the page and does not turn it.
-- The page cache and the subtitles live in the WebView's IndexedDB.
+- The pages, the copy of the last book and the meta data of each book
+  (page, subtitles, "Force OCR") live in the WebView's IndexedDB.
   Uninstalling the app deletes them.
 
 ## Dependencies
@@ -292,16 +382,22 @@ Runtime:
 
 - `pdfjs-dist`: renders PDF pages to a canvas and reads the text layer.
 - `tesseract.js`: OCR in a Web Worker. Returns a box for each symbol.
+- `tesseract.js-core`: the WebAssembly core of tesseract.js. The app
+  serves it from its own files, so OCR needs the network only for the
+  language data.
 - `fast-diff`: character-level Myers diff. The alignment is built on it.
 - `idb`: a thin Promise wrapper around IndexedDB. It replaces the
   callback and event plumbing of the raw IndexedDB API.
 - `@capacitor/core`, `@capacitor/android`: the Android shell and the
   plugin bridge.
+- `@capacitor/app`: the Back button, the app state (front or
+  background) and "move the app to the background".
 
 Development:
 
 - `vite`, `typescript`: build and strict type check.
 - `vitest`, `fast-check`: unit tests and property tests.
+- `fake-indexeddb`: IndexedDB in Node, for the tests of the page cache.
 - `prettier`: formatting.
 - `sharp`, `pdf-lib`, `@pdf-lib/fontkit`, `tsx`: build the synthetic
   fixtures (render text to a page image, wrap it in an image-only PDF,
@@ -333,24 +429,36 @@ in a browser bundle.
 - `src/hit-test.ts`: pure tap on the page. Hit test, scan string, the
   lookup text.
 - `src/line-boxes.ts`: pure boxes that mark a cue, one for each text
-  line of the page, grown to the edges of its words.
+  line of the page, grown to the edges of its words. The left and the
+  right side get a quarter of the line height as padding, because OCR
+  symbol boxes can end before the ink.
 - `src/paging.ts`: pure page turns from keys, swipes and the arrows, the
-  page jump, and the reading direction.
+  page jump, the reading direction, and the limits of the long press.
 - `src/scroll.ts`: pure scroll position that brings the mark into view.
 - `src/messages.ts`: pure texts of the status strip.
 - `src/read-order.ts`: pure order in which the pages are read.
 - `src/book-text.ts`: pure tokens to the book text for SubRead.
+- `src/book-subtitles.ts`: pure rules for the subtitles of a book: the
+  subtitles when a book opens, the result file name for SubRead, and the
+  checks before a SubRead result loads.
+- `src/sentence.ts`: pure sentence around a token.
+- `src/anki-card.ts`: pure fields of an Anki card for a long press.
+- `src/suite.ts`: pure checklist of the SubRead suite.
+- `src/app-state.ts`: pure rules for the Back button and the screen.
 - `src/subread.ts`: the typed side of the plugin, with the web fallback.
-- `src/token-cache.ts`: IndexedDB store for the page tokens and the
-  subtitles (thin).
+- `src/token-cache.ts`: IndexedDB store for the page tokens, the copy of
+  the last book and the meta data of each book (thin).
 - `src/ocr.ts`, `src/pdf.ts`: thin browser wrappers around the libraries.
+  `src/ocr-job.ts`: the start error and the stop of OCR, without
+  tesseract.js.
 - `src/view.ts`: the page view: render to fit the width, draw the mark,
   scroll to it, render again on a resize.
 - `src/nav.ts`: page turns by the user: the arrows, the keys, the swipe
-  and the page jump.
+  and the page jump, and the long press.
 - `src/status.ts`: the status strip.
 - `src/drawer.ts`: the menu, a drawer on a phone.
-- `src/main.ts`: UI wiring: the book, the subtitles and the follow.
+- `src/main.ts`: UI wiring: the book, the subtitles, the follow, SubRead
+  and the app state.
 - `test/`: unit and property tests. `test/e2e/`: OCR and text-layer
   end-to-end tests.
 - `fixtures/`, `scripts/make-fixtures.ts`: synthetic scanned pages and
