@@ -3,7 +3,7 @@
 import { PlayerError, type ClockState } from './clock-source';
 
 /** The actions of the buttons in the strip. main.ts runs them. */
-export type ActionId = 'retry-reading';
+export type ActionId = 'retry-reading' | 'open-overlay';
 
 /** A text, and a link or a button after it. */
 export interface Message {
@@ -28,11 +28,19 @@ export function clockText(ms: number): string {
   return `${h > 0 ? `${h}:` : ''}${pad(Math.floor((s % 3600) / 60))}:${pad(s % 60)}`;
 }
 
+export const OPEN_OVERLAY = { id: 'open-overlay', text: 'Open SubRead Overlay' } as const;
+
 /**
  * What is wrong with the player, and what to do, for a reason of
  * `PlayerError` or `ClockState.error`. Null for another reason.
+ * `overlayInstalled` is true when SubRead Overlay is on the device: then a
+ * button opens it, so that the user can give it notification access.
  */
-export function playerProblem(reason: string, android: boolean): Message | null {
+export function playerProblem(
+  reason: string,
+  android: boolean,
+  overlayInstalled = false,
+): Message | null {
   switch (reason) {
     case 'no_player':
       return {
@@ -41,31 +49,57 @@ export function playerProblem(reason: string, android: boolean): Message | null 
           : 'Load the audio file first.',
       };
     case 'no_overlay':
-      return {
-        text: 'SubRead Overlay is not installed.',
-        link: { href: OVERLAY_RELEASES, text: 'Get it' },
-      };
+      return overlayInstalled
+        ? { text: 'SubRead Overlay does not answer.', action: OPEN_OVERLAY }
+        : {
+            text: 'SubRead Overlay is not installed.',
+            link: { href: OVERLAY_RELEASES, text: 'Get it' },
+          };
     case 'no_notification_access':
-      return { text: 'Allow notification access in SubRead Overlay.' };
+      return { text: 'Allow notification access in SubRead Overlay.', action: OPEN_OVERLAY };
     default:
       return null;
   }
 }
 
+/**
+ * True when play and "audio to page" cannot work: no SubRead Overlay, no
+ * notification access, or on the web no audio file.
+ */
+export function playerCommandsOff(error: string | null, android: boolean): boolean {
+  return (
+    error === 'no_overlay' ||
+    error === 'no_notification_access' ||
+    (!android && error === 'no_player')
+  );
+}
+
 /** The text for a command that failed. A PlayerError gets the text of its reason. */
-export function errorMessage(err: unknown, android: boolean): Message {
+export function errorMessage(err: unknown, android: boolean, overlayInstalled = false): Message {
   if (err instanceof PlayerError) {
-    return playerProblem(err.reason, android) ?? { text: `The player failed: ${err.reason}.` };
+    return (
+      playerProblem(err.reason, android, overlayInstalled) ?? {
+        text: `The player failed: ${err.reason}.`,
+      }
+    );
   }
   return { text: String(err) };
 }
 
 /** The player part of the strip: the time and the play state, or the problem. */
-export function playerMessage(s: ClockState | null, android: boolean): Message {
+export function playerMessage(
+  s: ClockState | null,
+  android: boolean,
+  overlayInstalled = false,
+): Message {
   const name = android ? 'Player' : 'Audio';
   if (!s) return { text: `${name}: not read yet.` };
   if (s.error !== null) {
-    return playerProblem(s.error, android) ?? { text: `${name}: cannot read it (${s.error}).` };
+    return (
+      playerProblem(s.error, android, overlayInstalled) ?? {
+        text: `${name}: cannot read it (${s.error}).`,
+      }
+    );
   }
   if (s.positionMs === null) return { text: `${name}: no position.` };
   return { text: `${name} ${clockText(s.positionMs)}, ${s.playing ? 'playing' : 'paused'}` };

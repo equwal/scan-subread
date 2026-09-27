@@ -36,6 +36,10 @@ export interface NavState {
 export interface Nav {
   /** Shows the page label, and the state and the names of the arrows. */
   update(): void;
+  /** True while the page jump is open. */
+  jumpOpen(): boolean;
+  /** Closes the page jump. */
+  closeJump(): void;
 }
 
 function zoomed(): boolean {
@@ -206,5 +210,7 @@ export function setupNav(ui: NavElements, s: NavState, turnTo: (index: number) =
       name(ui.pageRight, arrowStep('right', rtl));
       if (pages === 0) closeJump();
     },
+    jumpOpen: () => !ui.pageInput.hidden,
+    closeJump,
   };
 }

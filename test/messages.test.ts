@@ -14,6 +14,7 @@ import {
   pagesReadText,
   pdfLoadedText,
   pdfOpenText,
+  playerCommandsOff,
   playerMessage,
   playerProblem,
   readingEndMessage,
@@ -48,13 +49,46 @@ describe('playerProblem', () => {
       text: 'SubRead Overlay is not installed.',
       link: { href: OVERLAY_RELEASES, text: 'Get it' },
     });
+  });
+
+  it('gives a button that opens SubRead Overlay when it has no notification access', () => {
+    // The phone finding: the strip showed "PlayerError: no_notification_access".
     expect(playerProblem('no_notification_access', true)).toEqual({
       text: 'Allow notification access in SubRead Overlay.',
+      action: { id: 'open-overlay', text: 'Open SubRead Overlay' },
     });
+  });
+
+  it('gives the button, not the link, when SubRead Overlay is installed but does not answer', () => {
+    expect(playerProblem('no_overlay', true, true)).toEqual({
+      text: 'SubRead Overlay does not answer.',
+      action: { id: 'open-overlay', text: 'Open SubRead Overlay' },
+    });
+    expect(playerMessage(state({ positionMs: null, error: 'no_overlay' }), true, true)).toEqual(
+      playerProblem('no_overlay', true, true),
+    );
+    expect(errorMessage(new PlayerError('no_overlay'), true, true)).toEqual(
+      playerProblem('no_overlay', true, true),
+    );
   });
 
   it('gives null for another reason', () => {
     expect(playerProblem('malformed', true)).toBeNull();
+  });
+});
+
+describe('playerCommandsOff', () => {
+  it('turns off play and "audio to page" without notification access', () => {
+    // The phone finding: with no notification access, play stayed on.
+    expect(playerCommandsOff('no_notification_access', true)).toBe(true);
+    expect(playerCommandsOff('no_overlay', true)).toBe(true);
+  });
+
+  it('turns them off on the web without an audio file only', () => {
+    expect(playerCommandsOff('no_player', false)).toBe(true);
+    expect(playerCommandsOff('no_player', true)).toBe(false);
+    expect(playerCommandsOff(null, true)).toBe(false);
+    expect(playerCommandsOff(null, false)).toBe(false);
   });
 });
 

@@ -5,7 +5,9 @@
 // are in drawer.ts (the menu), nav.ts (page turns by the user), status.ts
 // (the strip) and view.ts (the page).
 
+import { App } from '@capacitor/app';
 import { createAligner, type Aligner, type OcrToken, type TokenSpan } from './align';
+import { backStep, keepScreenOn } from './app-state';
 import { resultName, srtName, subreadConcerns, subtitlesOnOpen } from './book-subtitles';
 import { bookText } from './book-text';
 import { LocalAudioClock, OverlayClock, type ClockSource, type ClockState } from './clock-source';
@@ -27,6 +29,7 @@ import {
   pagesReadText,
   pdfLoadedText,
   pdfOpenText,
+  playerCommandsOff,
   playerMessage,
   readingEndMessage,
   readingText,
@@ -47,7 +50,7 @@ import type { PdfDoc } from './pdf';
 import { nextPage } from './read-order';
 import { scrollTarget } from './scroll';
 import { fill, onAction, say, showPlayer, showReading } from './status';
-import { isAndroid, SubRead, type SubtitlesResult } from './subread';
+import { isAndroid, SubRead, type SubtitlesResult, type SuiteApps } from './subread';
 import { decodeSubtitles, lastCueAt, parseSubtitles, type Cue } from './subtitles';
 import {
   bookKey,
@@ -168,6 +171,12 @@ const state = {
   making: null as string | null,
   /** True while the player waits for a dictionary lookup that this app paused. */
   lookupPaused: false,
+  /** False while the app is in the background. */
+  active: true,
+  /** True while the plugin keeps the screen on. */
+  awake: false,
+  /** The apps of the SubRead suite on the device, or null before the first answer. */
+  suite: null as SuiteApps | null,
   /** True while a page turn by the user holds the follow. */
   held: false,
 };
@@ -230,10 +239,11 @@ ui.rtl.addEventListener('change', () => {
   nav.update();
 });
 
-// A new follow mode follows the audio at once.
+// A new follow mode follows the audio at once. "Off" lets the screen turn off.
 ui.follow.addEventListener('change', () => {
   settings.set('follow', followMode());
   runFollow('follow');
+  updateAwake();
 });
 ui.pauseLookup.addEventListener('change', () =>
   settings.set('pauseLookup', ui.pauseLookup.checked ? '1' : '0'),
@@ -263,7 +273,7 @@ function setForceOcr(on: boolean): void {
 
 /** Shows a command that failed in the strip. */
 function sayError(err: unknown): void {
-  say(errorMessage(err, isAndroid));
+  say(errorMessage(err, isAndroid, overlayInstalled()));
 }
 
 // --- The PDF ---
@@ -986,7 +996,7 @@ function scrollCueList(i: number): void {
 // --- The follow ---
 
 function showPlayerStatus(s: ClockState): void {
-  ui.play.disabled = s.error === 'no_overlay' || (!isAndroid && s.error === 'no_player');
+  ui.play.disabled = playerCommandsOff(s.error, isAndroid);
   ui.play.classList.toggle('playing', s.playing);
   const action = s.playing ? 'Pause' : 'Play';
   if (ui.play.title !== action) {
@@ -994,11 +1004,20 @@ function showPlayerStatus(s: ClockState): void {
     ui.play.setAttribute('aria-label', action);
   }
   // Before a PDF is open, the start card tells what to do first.
-  showPlayer(state.pdf ? playerMessage(s, isAndroid) : null);
+  showPlayer(state.pdf ? playerMessage(s, isAndroid, overlayInstalled()) : null);
   updateSyncPage();
+  updateAwake();
 }
 
-/** "Move the audio to this page" needs cues and a player with a position. */
+/** True when SubRead Overlay, the release or the debug build, is on the device. */
+function overlayInstalled(): boolean {
+  return state.suite !== null && (state.suite.overlay || state.suite.overlayDebug);
+}
+
+/**
+ * "Move the audio to this page" needs cues and a player with a position.
+ * A player with a problem has no position that counts.
+ */
 function updateSyncPage(): void {
   const s = state.clock;
   ui.syncPage.disabled = state.cues.length === 0 || !s || s.positionMs === null || s.error !== null;
@@ -1066,6 +1085,73 @@ function seek(ms: number): void {
 
 const clock: ClockSource = isAndroid ? new OverlayClock(SubRead) : new LocalAudioClock(ui.audio);
 clock.start(applyClock);
+
+// --- The screen and the app state ---
+
+/** Keeps the screen on during read-along (keepScreenOn). Calls the plugin only on a change. */
+function updateAwake(): void {
+  const on = keepScreenOn({
+    active: state.active,
+    book: state.pdf !== null,
+    playing: state.clock?.playing === true,
+    mode: followMode(),
+  });
+  if (on === state.awake) return;
+  state.awake = on;
+  SubRead.keepAwake({ on }).catch(() => undefined);
+}
+
+/**
+ * The app goes to the background or comes back. In the background the
+ * clock stops, so no poll of the overlay runs, and the screen may turn
+ * off. Back in front, the clock reads the player at once.
+ */
+function setActive(active: boolean): void {
+  if (active === state.active) return;
+  state.active = active;
+  if (active) {
+    clock.start(applyClock);
+    if (isAndroid) {
+      void checkPendingSubtitles();
+      void refreshSuite();
+    }
+  } else {
+    clock.stop();
+    // Android can stop the reader in the background.
+    flushPageSave();
+  }
+  updateAwake();
+}
+
+void App.addListener('appStateChange', ({ isActive }) => setActive(isActive));
+
+// Back never finishes the activity: that destroyed the WebView and the
+// reader lost the book. On the web the browser handles Back.
+if (isAndroid) {
+  void App.addListener('backButton', () => {
+    switch (backStep({ jump: nav.jumpOpen(), drawer: drawer.covers() })) {
+      case 'close-jump':
+        nav.closeJump();
+        break;
+      case 'close-drawer':
+        drawer.set(false);
+        break;
+      case 'minimize':
+        void App.minimizeApp();
+        break;
+    }
+  });
+}
+
+/** Asks which apps of the SubRead suite are installed. */
+async function refreshSuite(): Promise<void> {
+  try {
+    state.suite = await SubRead.suite();
+  } catch {
+    return;
+  }
+  if (state.clock) showPlayerStatus(state.clock);
+}
 
 ui.play.addEventListener('click', () => {
   const action = state.clock?.playing ? clock.pause() : clock.play();
@@ -1217,6 +1303,9 @@ onAction((id) => {
     case 'retry-reading':
       void readBook(true);
       break;
+    case 'open-overlay':
+      SubRead.openOverlay().catch(sayError);
+      break;
   }
 });
 
@@ -1231,6 +1320,9 @@ ui.audioRow.hidden = isAndroid;
 // The web copies a lookup at once: there is no dictionary app to choose or to wait for.
 ui.dictRow.hidden = !isAndroid;
 ui.pauseRow.hidden = !isAndroid;
-if (isAndroid) void loadDictionaries().catch(sayError);
+if (isAndroid) {
+  void loadDictionaries().catch(sayError);
+  void refreshSuite();
+}
 watchDb();
 void restoreLastBook();
