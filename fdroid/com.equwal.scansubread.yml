@@ -16,9 +16,9 @@ Repo: https://github.com/equwal/scan-subread.git
 Binaries: https://github.com/equwal/scan-subread/releases/download/v%v/Scan-SubRead-%v.apk
 
 Builds:
-  - versionName: 0.1.1
-    versionCode: 2
-    commit: ee358f5dc39c207d210be2ab39181992bd8e0f53
+  - versionName: 0.1.2
+    versionCode: 3
+    commit: e65a7903075ae53e806e5d773e7416d39259242d
     subdir: android/app
     sudo:
       - curl -Lo node.tar.gz https://nodejs.org/dist/v22.23.3/node-v22.23.3-linux-x64.tar.gz
@@ -37,5 +37,5 @@ AllowedAPKSigningKeys: e46f72ef28c79489cad0f1eee60cbf7fd3f29b5bff1bb1d82bab1e304
 
 AutoUpdateMode: Version
 UpdateCheckMode: Tags
-CurrentVersion: 0.1.1
-CurrentVersionCode: 2
+CurrentVersion: 0.1.2
+CurrentVersionCode: 3
